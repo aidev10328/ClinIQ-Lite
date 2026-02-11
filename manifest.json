@@ -1,0 +1,16 @@
+{
+  "name": "Next.js + NestJS TypeScript",
+  "version": "1.0.0",
+  "description": "Full-stack TypeScript template with Next.js frontend, NestJS API, PostgreSQL, and JWT authentication",
+  "tokens": {
+    "ClinIQ Lite": "{{appName}}",
+    "cliniq-lite": "{{appSlug}}",
+    "Minimal appointment scheduling + daily queue management for very small clinics (1-2 doctors, 1-2 staff). NOT an EMR. No medical reports, prescriptions, clinical notes, billing, or insurance.": "{{description}}"
+  },
+  "defaults": {
+    "appName": "My App",
+    "appSlug": "my-app",
+    "description": "A full-stack application built with Next.js and NestJS"
+  },
+  "conditions": []
+}

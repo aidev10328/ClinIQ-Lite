@@ -1,0 +1,497 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")  // Used for migrations (bypasses PgBouncer)
+}
+
+// ============================================
+// ClinIQ Lite - Platform User Model
+// ============================================
+
+enum Role {
+  ADMIN
+  USER
+  VIEWER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String?
+  lastName     String?
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  clinicUsers       ClinicUser[]
+  createdAppointments Appointment[] @relation("CreatedByUser")
+  doctorProfile     Doctor[]
+}
+
+// ============================================
+// ClinIQ Lite - Enums
+// ============================================
+
+enum ClinicUserRole {
+  CLINIC_MANAGER
+  CLINIC_DOCTOR
+  CLINIC_STAFF
+}
+
+enum ClinicAuthMode {
+  PASSWORD
+  PHONE_OTP
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CHECKED_IN
+  CANCELLED
+  RESCHEDULED
+  COMPLETED
+  NO_SHOW
+}
+
+enum QueuePriority {
+  NORMAL
+  URGENT
+  EMERGENCY
+}
+
+enum QueueStatus {
+  QUEUED
+  WAITING
+  WITH_DOCTOR
+  COMPLETED
+  CANCELLED
+}
+
+enum QueueSource {
+  WALKIN
+  APPOINTMENT
+}
+
+enum QueueOutcome {
+  DONE
+  NO_SHOW
+}
+
+enum ShiftType {
+  MORNING
+  AFTERNOON
+}
+
+enum TimeOffType {
+  BREAK
+  VACATION
+  OTHER
+}
+
+enum SlotStatus {
+  AVAILABLE
+  BOOKED
+  BLOCKED
+}
+
+// ============================================
+// ClinIQ Lite - Clinic & Staff Models
+// ============================================
+
+model Clinic {
+  id          String         @id @default(uuid())
+  name        String
+  logoUrl     String?
+  pictureUrl  String?
+  phone       String?
+
+  // Country & Timezone (determines phone code for all entities)
+  countryCode String         @default("US")  // ISO 3166-1 alpha-2 (US, IN, GB, etc.)
+  timezone    String         @default("America/Chicago")
+
+  // Address fields (separate)
+  street      String?
+  city        String?
+  state       String?
+  postalCode  String?
+  country     String?        // Full country name
+
+  // Licensing - doctors need licenses to use appointments/queue
+  licensesTotal Int          @default(0)   // Total licenses purchased
+  licensesUsed  Int          @default(0)   // Currently assigned to doctors
+
+  authMode    ClinicAuthMode @default(PASSWORD)
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relations
+  clinicUsers           ClinicUser[]
+  doctors               Doctor[]
+  doctorSchedules       DoctorSchedule[]
+  doctorShiftTemplates  DoctorShiftTemplate[]
+  doctorWeeklyShifts    DoctorWeeklyShift[]
+  doctorTimeOffs        DoctorTimeOff[]
+  patients              Patient[]
+  appointments          Appointment[]
+  queueEntries          QueueEntry[]
+  publicTokens          PatientPublicToken[]
+  licensePurchases      LicensePurchase[]
+  slots                 Slot[]
+  staffDoctorAssignments StaffDoctorAssignment[]
+}
+
+model ClinicUser {
+  id        String         @id @default(uuid())
+  clinicId  String
+  userId    String
+  role      ClinicUserRole
+  phone     String?
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  // Relations
+  clinic            Clinic                  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doctorAssignments StaffDoctorAssignment[]
+
+  // Indexes
+  @@unique([clinicId, userId])
+  @@index([userId])
+}
+
+// Staff-Doctor Assignment - Controls which doctors staff members can access
+model StaffDoctorAssignment {
+  id           String   @id @default(uuid())
+  clinicId     String
+  clinicUserId String   // The staff member's ClinicUser id
+  doctorId     String
+  createdAt    DateTime @default(now())
+
+  // Relations
+  clinic     Clinic     @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  clinicUser ClinicUser @relation(fields: [clinicUserId], references: [id], onDelete: Cascade)
+  doctor     Doctor     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicUserId, doctorId])
+  @@index([clinicId, clinicUserId])
+  @@index([clinicId, doctorId])
+}
+
+// ============================================
+// ClinIQ Lite - Platform Selectables (Dropdowns)
+// ============================================
+
+model PlatformSelectable {
+  id        String   @id @default(uuid())
+  key       String
+  value     String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key, isActive])
+}
+
+// ============================================
+// ClinIQ Lite - Doctor & Schedule Models
+// ============================================
+
+model Doctor {
+  id                    String   @id @default(uuid())
+  clinicId              String
+  userId                String?  // Optional: link to User for doctor login
+  firstName             String   @default("") // First name
+  lastName              String   @default("") // Last name
+  fullName              String   // Computed: firstName + lastName
+  specialization        String
+  appointmentDurationMin Int      @default(15)
+  photoUrl              String?
+  phone                 String?  // Doctor's phone number
+  email                 String?  // Doctor's email
+
+  // Licensing
+  hasLicense            Boolean  @default(false)  // Whether license is assigned
+  licenseAssignedAt     DateTime?                 // When license was assigned
+
+  // Schedule configuration tracking
+  scheduleConfiguredAt  DateTime?                 // When schedule was first fully configured
+
+  // Slot generation range - set by admin when generating slots manually
+  slotsGeneratedFrom    DateTime? @db.Date        // Start date of generated slots
+  slotsGeneratedTo      DateTime? @db.Date        // End date of generated slots
+
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  clinic           Clinic                  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  user             User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  schedules        DoctorSchedule[]
+  shiftTemplates   DoctorShiftTemplate[]
+  weeklyShifts     DoctorWeeklyShift[]
+  timeOffs         DoctorTimeOff[]
+  appointments     Appointment[]
+  queueEntries     QueueEntry[]
+  slots            Slot[]
+  staffAssignments StaffDoctorAssignment[]
+
+  @@unique([clinicId, userId])
+  @@index([clinicId, isActive])
+  @@index([clinicId, hasLicense])
+  @@index([userId])
+}
+
+model DoctorSchedule {
+  id        String  @id @default(uuid())
+  clinicId  String
+  doctorId  String
+  dayOfWeek Int     // 0 = Sunday, 6 = Saturday
+  startTime String  // 'HH:MM' format (e.g., '09:00')
+  endTime   String  // 'HH:MM' format (e.g., '17:00')
+  isEnabled Boolean @default(true)
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek, startTime, endTime])
+}
+
+// Shift template defines start/end times for each shift type per doctor
+model DoctorShiftTemplate {
+  id        String    @id @default(uuid())
+  clinicId  String
+  doctorId  String
+  shiftType ShiftType
+  startTime String    // 'HH:MM' format (e.g., '10:30')
+  endTime   String    // 'HH:MM' format (e.g., '13:00')
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, shiftType])
+  @@index([clinicId, doctorId])
+}
+
+// Weekly shift enables/disables specific shifts per day of week
+model DoctorWeeklyShift {
+  id        String    @id @default(uuid())
+  clinicId  String
+  doctorId  String
+  dayOfWeek Int       // 0 = Sunday, 6 = Saturday
+  shiftType ShiftType
+  isEnabled Boolean   @default(true)
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek, shiftType])
+  @@index([clinicId, doctorId])
+}
+
+// Time off periods for doctors
+model DoctorTimeOff {
+  id        String      @id @default(uuid())
+  clinicId  String
+  doctorId  String
+  startDate DateTime    @db.Date
+  endDate   DateTime    @db.Date
+  type      TimeOffType
+  reason    String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, startDate, endDate])
+  @@index([clinicId, doctorId])
+}
+
+// ============================================
+// ClinIQ Lite - Patient Model
+// ============================================
+
+model Patient {
+  id        String   @id @default(uuid())
+  clinicId  String
+  firstName String   @default("") // First name
+  lastName  String   @default("") // Last name
+  fullName  String   // Computed: firstName + lastName
+  phone     String   @unique  // Unique across entire portal
+  email     String?  // Optional email
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  clinic       Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  queueEntries QueueEntry[]
+  publicTokens PatientPublicToken[]
+
+  @@index([clinicId])
+}
+
+// ============================================
+// ClinIQ Lite - Appointment Model
+// ============================================
+
+model Appointment {
+  id              String            @id @default(uuid())
+  clinicId        String
+  doctorId        String
+  patientId       String
+  startsAt        DateTime
+  endsAt          DateTime
+  reason          String?
+  status          AppointmentStatus @default(BOOKED)
+  createdByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  clinic      Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor      Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient     Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  createdBy   User?   @relation("CreatedByUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  publicTokens PatientPublicToken[]
+  slot        Slot?
+
+  @@index([clinicId, doctorId, startsAt])
+  @@index([clinicId, startsAt])
+  @@index([clinicId, status])
+}
+
+// ============================================
+// ClinIQ Lite - Persisted Slot Model
+// ============================================
+
+model Slot {
+  id            String     @id @default(uuid())
+  clinicId      String
+  doctorId      String
+  date          DateTime   @db.Date           // The date of the slot (YYYY-MM-DD)
+  startsAt      DateTime                      // Full datetime (UTC)
+  endsAt        DateTime                      // Full datetime (UTC)
+  shiftType     ShiftType                     // MORNING, AFTERNOON
+  status        SlotStatus @default(AVAILABLE)
+
+  // Optional link to appointment when booked
+  appointmentId String?    @unique
+
+  // Audit fields
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relations
+  clinic      Clinic       @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor      Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  // Performance indexes for common queries
+  @@unique([doctorId, startsAt])                      // Prevent duplicate slots
+  @@index([clinicId, doctorId, date])                 // Query slots by doctor and date
+  @@index([clinicId, doctorId, date, status])         // Filter by availability
+  @@index([clinicId, doctorId, startsAt, endsAt])     // Time range queries
+  @@index([doctorId, date, shiftType])                // Shift-based queries
+}
+
+// ============================================
+// ClinIQ Lite - Queue Entry Model
+// ============================================
+
+model QueueEntry {
+  id          String        @id @default(uuid())
+  clinicId    String
+  doctorId    String
+  patientId   String
+  queueDate   DateTime      @db.Date
+  position    Int
+  priority    QueuePriority @default(NORMAL)
+  status      QueueStatus   @default(QUEUED)
+  source      QueueSource
+  outcome     QueueOutcome?  // Set when status becomes COMPLETED
+  reason      String?        // Reason for visit
+  checkedInAt DateTime      @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  clinic       Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor       Doctor  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  publicTokens PatientPublicToken[]
+
+  @@index([clinicId, queueDate, doctorId, status])
+  @@index([clinicId, queueDate])
+  @@index([clinicId, doctorId, checkedInAt])
+  @@index([clinicId, doctorId, startedAt])
+  @@index([clinicId, doctorId, completedAt])
+  @@index([clinicId, doctorId, queueDate, outcome])
+}
+
+// ============================================
+// ClinIQ Lite - Patient Public Token
+// ============================================
+
+model PatientPublicToken {
+  id            String    @id @default(uuid())
+  clinicId      String
+  token         String    @unique
+  queueEntryId  String?
+  appointmentId String?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+
+  // Relations
+  clinic      Clinic       @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  queueEntry  QueueEntry?  @relation(fields: [queueEntryId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient     Patient?     @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId   String?
+
+  @@index([clinicId, expiresAt])
+}
+
+// ============================================
+// ClinIQ Lite - License Purchase Tracking
+// ============================================
+
+model LicensePurchase {
+  id          String   @id @default(uuid())
+  clinicId    String
+  quantity    Int                           // Number of licenses purchased
+  pricePerLicense Decimal @db.Decimal(10,2) // Price per license at time of purchase
+  totalAmount Decimal @db.Decimal(10,2)     // Total amount paid
+  currency    String   @default("USD")
+
+  // Payment info (for reference)
+  paymentRef  String?                       // External payment reference (Stripe, etc.)
+  paymentMethod String?                     // card, bank_transfer, etc.
+
+  notes       String?
+  purchasedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@index([clinicId, purchasedAt])
+}
