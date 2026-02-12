@@ -58,7 +58,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!authLoading && user) {
-      router.replace('/app/dashboard');
+      router.replace('/app/queue');
     }
   }, [user, authLoading, router]);
 
@@ -81,7 +81,7 @@ export default function LoginPage() {
 
       if (data?.access_token) {
         await loginWithToken(data.access_token);
-        router.replace('/app/dashboard');
+        router.replace('/app/queue');
       } else {
         setError(apiError?.message || 'Invalid credentials');
         refreshCaptcha();

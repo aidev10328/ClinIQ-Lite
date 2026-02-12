@@ -1,6 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { getMe, getClinicMe, User, ClinicWithRole } from '../lib/api';
 import {
   getToken,
@@ -11,6 +12,9 @@ import {
   isManager,
   isStaffOrManager,
   ClinicRole,
+  updateLastActivity,
+  isSessionExpired,
+  getInactivityTimeout,
 } from '../lib/auth';
 
 type AuthContextShape = {
@@ -35,6 +39,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [clinic, setClinic] = useState<ClinicWithRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const pathname = usePathname();
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchClinic = useCallback(async () => {
     const clinicRes = await getClinicMe();
@@ -48,6 +55,92 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearClinicId();
     }
   }, []);
+
+  const handleLogout = useCallback(() => {
+    clearAllAuth();
+    setUser(null);
+    setClinic(null);
+    // Clear inactivity timer
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
+    // Only redirect if not already on login page
+    if (pathname !== '/login') {
+      router.push('/login');
+    }
+  }, [router, pathname]);
+
+  // Reset inactivity timer on user activity
+  const resetInactivityTimer = useCallback(() => {
+    // Clear existing timer
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+
+    // Update last activity timestamp
+    updateLastActivity();
+
+    // Set new timer for auto-logout
+    const token = getToken();
+    if (token) {
+      inactivityTimerRef.current = setTimeout(() => {
+        handleLogout();
+      }, getInactivityTimeout());
+    }
+  }, [handleLogout]);
+
+  // Set up activity listeners
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+
+    const handleActivity = () => {
+      resetInactivityTimer();
+    };
+
+    // Only add listeners if user is logged in
+    const token = getToken();
+    if (token) {
+      activityEvents.forEach(event => {
+        window.addEventListener(event, handleActivity, { passive: true });
+      });
+
+      // Start initial inactivity timer
+      resetInactivityTimer();
+    }
+
+    return () => {
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, [user, resetInactivityTimer]);
+
+  // Check for session expiry on mount and when returning to tab
+  useEffect(() => {
+    const checkSessionExpiry = () => {
+      if (isSessionExpired() && user) {
+        handleLogout();
+      }
+    };
+
+    // Check on visibility change (when user returns to tab)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkSessionExpiry();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user, handleLogout]);
 
   const fetchUserAndClinic = useCallback(async () => {
     const token = getToken();
@@ -100,12 +193,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     await fetchUserAndClinic();
     setLoading(false);
+    // Start inactivity timer after login
+    resetInactivityTimer();
   }
 
   function logout() {
-    clearAllAuth();
-    setUser(null);
-    setClinic(null);
+    handleLogout();
   }
 
   const clinicRole = clinic?.clinicRole;

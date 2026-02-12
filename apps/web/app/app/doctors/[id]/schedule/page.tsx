@@ -32,14 +32,14 @@ const DURATION_OPTIONS = [
 ];
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const SHIFT_TYPES: ShiftType[] = ['MORNING', 'AFTERNOON'];
+const SHIFT_TYPES: ShiftType[] = ['MORNING', 'EVENING'];
 const SHIFT_LABELS: Record<ShiftType, string> = {
   MORNING: 'Morning',
-  AFTERNOON: 'Afternoon',
+  EVENING: 'Evening',
 };
 const SHIFT_ICONS: Record<ShiftType, string> = {
   MORNING: '🌅',
-  AFTERNOON: '☀️',
+  EVENING: '🌆',
 };
 
 function formatTime(time: string): string {
@@ -65,7 +65,7 @@ export default function DoctorSchedulePage() {
   const [appointmentDuration, setAppointmentDuration] = useState(15);
   const [shiftTemplates, setShiftTemplates] = useState<Record<ShiftType, { start: string; end: string }>>({
     MORNING: { start: '09:00', end: '13:00' },
-    AFTERNOON: { start: '14:00', end: '18:00' },
+    EVENING: { start: '14:00', end: '18:00' },
   });
   const [weeklyShifts, setWeeklyShifts] = useState<Record<number, Record<ShiftType, boolean>>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -102,7 +102,7 @@ export default function DoctorSchedulePage() {
       // Set shift templates
       const templates: Record<ShiftType, { start: string; end: string }> = {
         MORNING: scheduleData.shiftTemplate.MORNING || { start: '09:00', end: '13:00' },
-        AFTERNOON: scheduleData.shiftTemplate.AFTERNOON || { start: '14:00', end: '18:00' },
+        EVENING: scheduleData.shiftTemplate.EVENING || { start: '14:00', end: '18:00' },
       };
       setShiftTemplates(templates);
 
@@ -110,7 +110,7 @@ export default function DoctorSchedulePage() {
       const weekly: Record<number, Record<ShiftType, boolean>> = {};
       for (let day = 0; day <= 6; day++) {
         const dayData = scheduleData.weekly.find((w) => w.dayOfWeek === day);
-        weekly[day] = dayData?.shifts || { MORNING: false, AFTERNOON: false };
+        weekly[day] = dayData?.shifts || { MORNING: false, EVENING: false };
       }
       setWeeklyShifts(weekly);
     }
@@ -168,7 +168,7 @@ export default function DoctorSchedulePage() {
       appointmentDurationMin: appointmentDuration,
       shiftTemplate: {
         MORNING: shiftTemplates.MORNING,
-        AFTERNOON: shiftTemplates.AFTERNOON,
+        EVENING: shiftTemplates.EVENING,
       },
       weekly: Object.entries(weeklyShifts).map(([day, shifts]) => ({
         dayOfWeek: parseInt(day),
@@ -388,8 +388,8 @@ export default function DoctorSchedulePage() {
 
               <div className="space-y-2">
                 {DAY_NAMES.map((dayName, dayIndex) => {
-                  const dayShifts = weeklyShifts[dayIndex] || { MORNING: false, AFTERNOON: false };
-                  const hasAnyShift = dayShifts.MORNING || dayShifts.AFTERNOON;
+                  const dayShifts = weeklyShifts[dayIndex] || { MORNING: false, EVENING: false };
+                  const hasAnyShift = dayShifts.MORNING || dayShifts.EVENING;
 
                   return (
                     <div

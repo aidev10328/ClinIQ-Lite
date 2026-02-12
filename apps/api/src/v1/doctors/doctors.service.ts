@@ -14,7 +14,7 @@ export interface WeeklyShiftDto {
   dayOfWeek: number;
   shifts: {
     MORNING: boolean;
-    AFTERNOON: boolean;
+    EVENING: boolean;
   };
 }
 
@@ -35,7 +35,7 @@ export interface DoctorScheduleResponse {
   };
   shiftTemplate: {
     MORNING: ShiftTemplateDto | null;
-    AFTERNOON: ShiftTemplateDto | null;
+    EVENING: ShiftTemplateDto | null;
   };
   weekly: WeeklyShiftDto[];
   timeOff: TimeOffDto[];
@@ -45,13 +45,13 @@ export interface UpdateScheduleDto {
   appointmentDurationMin?: number;
   shiftTemplate?: {
     MORNING?: { start: string; end: string };
-    AFTERNOON?: { start: string; end: string };
+    EVENING?: { start: string; end: string };
   };
   weekly?: Array<{
     dayOfWeek: number;
     shifts: {
       MORNING?: boolean;
-      AFTERNOON?: boolean;
+      EVENING?: boolean;
     };
   }>;
 }
@@ -369,7 +369,7 @@ export class DoctorsService {
     // Build shift template map
     const shiftTemplateMap: DoctorScheduleResponse['shiftTemplate'] = {
       MORNING: null,
-      AFTERNOON: null,
+      EVENING: null,
     };
 
     for (const template of shiftTemplates) {
@@ -386,9 +386,9 @@ export class DoctorsService {
     });
 
     // Build weekly schedule (0-6 for each day)
-    const weeklyMap: Record<number, { MORNING: boolean; AFTERNOON: boolean }> = {};
+    const weeklyMap: Record<number, { MORNING: boolean; EVENING: boolean }> = {};
     for (let day = 0; day <= 6; day++) {
-      weeklyMap[day] = { MORNING: false, AFTERNOON: false };
+      weeklyMap[day] = { MORNING: false, EVENING: false };
     }
 
     for (const shift of weeklyShifts) {
@@ -480,7 +480,7 @@ export class DoctorsService {
 
       // Update shift templates
       if (data.shiftTemplate) {
-        const shiftTypes: ShiftType[] = ['MORNING', 'AFTERNOON'];
+        const shiftTypes: ShiftType[] = ['MORNING', 'EVENING'];
 
         for (const shiftType of shiftTypes) {
           const template = data.shiftTemplate[shiftType];
@@ -509,7 +509,7 @@ export class DoctorsService {
       // Update weekly shifts
       if (data.weekly) {
         for (const weekEntry of data.weekly) {
-          const shiftTypes: ShiftType[] = ['MORNING', 'AFTERNOON'];
+          const shiftTypes: ShiftType[] = ['MORNING', 'EVENING'];
 
           for (const shiftType of shiftTypes) {
             const isEnabled = weekEntry.shifts[shiftType];
@@ -752,7 +752,7 @@ export class DoctorsService {
     // Merge shift templates
     const newShiftTemplates: Record<string, { start: string; end: string } | null> = {
       MORNING: currentSchedule.shiftTemplate.MORNING,
-      AFTERNOON: currentSchedule.shiftTemplate.AFTERNOON,
+      EVENING: currentSchedule.shiftTemplate.EVENING,
     };
     if (proposedChanges.shiftTemplate) {
       for (const [shift, times] of Object.entries(proposedChanges.shiftTemplate)) {
@@ -770,7 +770,7 @@ export class DoctorsService {
     if (proposedChanges.weekly) {
       for (const entry of proposedChanges.weekly) {
         if (!newWeeklyShifts[entry.dayOfWeek]) {
-          newWeeklyShifts[entry.dayOfWeek] = { MORNING: false, AFTERNOON: false };
+          newWeeklyShifts[entry.dayOfWeek] = { MORNING: false, EVENING: false };
         }
         for (const [shift, enabled] of Object.entries(entry.shifts)) {
           if (enabled !== undefined) {

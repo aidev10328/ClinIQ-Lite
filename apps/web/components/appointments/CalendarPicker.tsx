@@ -6,7 +6,7 @@ type WeeklySchedule = {
   dayOfWeek: number;
   shifts: {
     MORNING: boolean;
-    AFTERNOON: boolean;
+    EVENING: boolean;
   };
 };
 
@@ -20,7 +20,7 @@ type TimeOff = {
 
 type ShiftTemplate = {
   MORNING?: { start: string; end: string } | null;
-  AFTERNOON?: { start: string; end: string } | null;
+  EVENING?: { start: string; end: string } | null;
 };
 
 type CalendarPickerProps = {
@@ -89,7 +89,7 @@ export default function CalendarPicker({
     // Check if any shift is enabled AND has a template defined
     const hasWorkingShift =
       (daySchedule.shifts.MORNING && shiftTemplate.MORNING) ||
-      (daySchedule.shifts.AFTERNOON && shiftTemplate.AFTERNOON);
+      (daySchedule.shifts.EVENING && shiftTemplate.EVENING);
 
     return !hasWorkingShift;
   }, [weekly, shiftTemplate]);

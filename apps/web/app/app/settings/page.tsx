@@ -65,7 +65,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!loading && !isManager) {
-      router.replace('/app/dashboard');
+      router.replace('/app/queue');
     }
   }, [isManager, loading, router]);
 
@@ -695,7 +695,7 @@ function EditDoctorView({
 
   const [shiftTemplates, setShiftTemplates] = useState<Record<ShiftType, { start: string; end: string }>>({
     MORNING: { start: '09:00', end: '13:00' },
-    AFTERNOON: { start: '14:00', end: '18:00' },
+    EVENING: { start: '14:00', end: '18:00' },
   });
   const [weeklyShifts, setWeeklyShifts] = useState<Record<number, Record<ShiftType, boolean>>>({});
 
@@ -736,14 +736,14 @@ function EditDoctorView({
       setAppointmentDurationMin(scheduleData.doctor.appointmentDurationMin);
       const templates: Record<ShiftType, { start: string; end: string }> = {
         MORNING: scheduleData.shiftTemplate.MORNING || { start: '09:00', end: '13:00' },
-        AFTERNOON: scheduleData.shiftTemplate.AFTERNOON || { start: '14:00', end: '18:00' },
+        EVENING: scheduleData.shiftTemplate.EVENING || { start: '14:00', end: '18:00' },
       };
       setShiftTemplates(templates);
 
       const weekly: Record<number, Record<ShiftType, boolean>> = {};
       for (let day = 0; day <= 6; day++) {
         const dayData = scheduleData.weekly.find((w) => w.dayOfWeek === day);
-        weekly[day] = dayData?.shifts || { MORNING: false, AFTERNOON: false };
+        weekly[day] = dayData?.shifts || { MORNING: false, EVENING: false };
       }
       setWeeklyShifts(weekly);
     }
@@ -759,7 +759,7 @@ function EditDoctorView({
 
     // Check shift template changes
     const originalTemplates = scheduleData.shiftTemplate;
-    for (const shift of ['MORNING', 'AFTERNOON'] as const) {
+    for (const shift of ['MORNING', 'EVENING'] as const) {
       const orig = originalTemplates[shift];
       const curr = shiftTemplates[shift];
       if (orig?.start !== curr?.start || orig?.end !== curr?.end) return true;
@@ -768,9 +768,9 @@ function EditDoctorView({
     // Check weekly shift changes
     for (let day = 0; day <= 6; day++) {
       const dayData = scheduleData.weekly.find((w) => w.dayOfWeek === day);
-      const original = dayData?.shifts || { MORNING: false, AFTERNOON: false };
-      const current = weeklyShifts[day] || { MORNING: false, AFTERNOON: false };
-      for (const shift of ['MORNING', 'AFTERNOON'] as const) {
+      const original = dayData?.shifts || { MORNING: false, EVENING: false };
+      const current = weeklyShifts[day] || { MORNING: false, EVENING: false };
+      for (const shift of ['MORNING', 'EVENING'] as const) {
         if (!!original[shift] !== !!current[shift]) return true;
       }
     }
@@ -1261,8 +1261,8 @@ function EditDoctorView({
                   <h2 className="text-xs font-semibold text-gray-900 mb-2">Weekly Schedule</h2>
                   <div className="space-y-1">
                     {DAY_NAMES.map((dayName, dayIndex) => {
-                      const dayShifts = weeklyShifts[dayIndex] || { MORNING: false, AFTERNOON: false };
-                      const hasAnyShift = dayShifts.MORNING || dayShifts.AFTERNOON;
+                      const dayShifts = weeklyShifts[dayIndex] || { MORNING: false, EVENING: false };
+                      const hasAnyShift = dayShifts.MORNING || dayShifts.EVENING;
                       const enabledShifts = SHIFT_TYPES.filter(s => dayShifts[s]);
                       return (
                         <div key={dayIndex} className={`flex items-center gap-2 p-1.5 rounded border ${hasAnyShift ? 'bg-green-50/50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>

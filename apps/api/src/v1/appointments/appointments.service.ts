@@ -94,6 +94,9 @@ export class AppointmentsService {
     },
     createdByUserId?: string,
   ) {
+    // Get clinic timezone for validation
+    const timezone = await this.getClinicTimezone(clinicId);
+
     // Get doctor to calculate end time
     const doctor = await this.prisma.doctor.findFirst({
       where: { id: data.doctorId, clinicId, isActive: true },
@@ -170,6 +173,12 @@ export class AppointmentsService {
       }
     } else {
       throw new BadRequestException('Either slotId or startsAt must be provided');
+    }
+
+    // Validate that appointment is not in the past
+    const now = new Date();
+    if (startsAt < now) {
+      throw new BadRequestException('Cannot book appointments in the past');
     }
 
     // Create appointment and book slot in transaction

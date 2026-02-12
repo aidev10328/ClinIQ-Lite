@@ -132,18 +132,18 @@ export const DAY_NAMES_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thur
 // Shift Constants
 // ============================================
 
-export type ShiftType = 'MORNING' | 'AFTERNOON';
+export type ShiftType = 'MORNING' | 'EVENING';
 
-export const SHIFT_TYPES: ShiftType[] = ['MORNING', 'AFTERNOON'];
+export const SHIFT_TYPES: ShiftType[] = ['MORNING', 'EVENING'];
 
 export const SHIFT_LABELS: Record<ShiftType, string> = {
   MORNING: 'Morning',
-  AFTERNOON: 'Afternoon',
+  EVENING: 'Evening',
 };
 
 export const SHIFT_ICONS: Record<ShiftType, string> = {
   MORNING: '🌅',
-  AFTERNOON: '☀️',
+  EVENING: '🌆',
 };
 
 // ============================================

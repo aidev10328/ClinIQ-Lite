@@ -85,7 +85,7 @@ enum QueueOutcome {
 
 enum ShiftType {
   MORNING
-  AFTERNOON
+  EVENING
 }
 
 enum TimeOffType {
@@ -138,6 +138,7 @@ model Clinic {
   doctorShiftTemplates  DoctorShiftTemplate[]
   doctorWeeklyShifts    DoctorWeeklyShift[]
   doctorTimeOffs        DoctorTimeOff[]
+  doctorDailyCheckIns   DoctorDailyCheckIn[]
   patients              Patient[]
   appointments          Appointment[]
   queueEntries          QueueEntry[]
@@ -240,6 +241,7 @@ model Doctor {
   shiftTemplates   DoctorShiftTemplate[]
   weeklyShifts     DoctorWeeklyShift[]
   timeOffs         DoctorTimeOff[]
+  dailyCheckIns    DoctorDailyCheckIn[]
   appointments     Appointment[]
   queueEntries     QueueEntry[]
   slots            Slot[]
@@ -323,6 +325,26 @@ model DoctorTimeOff {
   @@index([clinicId, doctorId])
 }
 
+// Daily check-in/check-out tracking for doctors
+model DoctorDailyCheckIn {
+  id           String    @id @default(uuid())
+  clinicId     String
+  doctorId     String
+  checkInDate  DateTime  @db.Date          // The date of check-in
+  checkInTime  DateTime                    // Actual check-in timestamp
+  checkOutTime DateTime?                   // Check-out timestamp (null if still checked in)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  doctor Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, checkInDate])  // One check-in per doctor per day
+  @@index([clinicId, checkInDate])
+  @@index([doctorId, checkInDate])
+}
+
 // ============================================
 // ClinIQ Lite - Patient Model
 // ============================================
@@ -388,7 +410,7 @@ model Slot {
   date          DateTime   @db.Date           // The date of the slot (YYYY-MM-DD)
   startsAt      DateTime                      // Full datetime (UTC)
   endsAt        DateTime                      // Full datetime (UTC)
-  shiftType     ShiftType                     // MORNING, AFTERNOON
+  shiftType     ShiftType                     // MORNING, EVENING
   status        SlotStatus @default(AVAILABLE)
 
   // Optional link to appointment when booked

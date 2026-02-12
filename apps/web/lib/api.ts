@@ -276,8 +276,46 @@ export type PublicQueueStatus = {
   doctorName: string;
   position: number;
   status: QueueStatus;
+  source: QueueSource; // WALKIN or APPOINTMENT
   peopleAhead: number;
   checkedInAt: string;
+  isDoctorBusy: boolean;
+  consultationDurationMin: number;
+  estimatedWaitMinutes: number | null;
+};
+
+// TV Display types
+export type TvDisplayPatient = {
+  token: number;
+  patientName: string;
+  status: QueueStatus;
+  priority: QueuePriority;
+  estimatedWaitMin: number | null;
+  checkedInAt: string | null;
+};
+
+export type TvDisplayDoctor = {
+  doctorId: string;
+  doctorName: string;
+  consultationDuration: number;
+  isCheckedIn: boolean;
+  currentPatient: {
+    token: number;
+    patientName: string;
+    startedAt: string | null;
+  } | null;
+  waitingCount: number;
+  patients: TvDisplayPatient[];
+};
+
+export type TvDisplayData = {
+  clinicName: string;
+  timezone: string;
+  generatedAt: string;
+  doctors: TvDisplayDoctor[];
+  totalWaiting: number;
+  totalWithDoctor: number;
+  totalInQueue: number;
 };
 
 // Issue public token for queue entry
@@ -300,6 +338,29 @@ export async function updateQueueStatus(
   return apiFetch<QueueEntry>(`/v1/queue/${queueId}/status`, {
     method: 'PATCH',
     body: JSON.stringify(body),
+  });
+}
+
+// Doctor check-in/check-out types and functions
+export type DoctorCheckInStatus = {
+  isCheckedIn: boolean;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+};
+
+export async function getDoctorCheckInStatus(doctorId: string) {
+  return apiFetch<DoctorCheckInStatus>(`/v1/queue/doctor/${doctorId}/checkin`);
+}
+
+export async function doctorCheckIn(doctorId: string) {
+  return apiFetch<DoctorCheckInStatus>(`/v1/queue/doctor/${doctorId}/checkin`, {
+    method: 'POST',
+  });
+}
+
+export async function doctorCheckOut(doctorId: string) {
+  return apiFetch<DoctorCheckInStatus>(`/v1/queue/doctor/${doctorId}/checkout`, {
+    method: 'POST',
   });
 }
 
@@ -440,7 +501,7 @@ export type GeneratedSlot = {
   time: string;       // HH:MM format in clinic timezone
   startsAt: string;   // ISO datetime (UTC)
   endsAt: string;     // ISO datetime (UTC)
-  shift: 'MORNING' | 'AFTERNOON';
+  shift: 'MORNING' | 'EVENING';
   isAvailable: boolean;
   // Appointment info included for booked slots
   appointment?: {
@@ -542,11 +603,16 @@ export async function getPublicQueueStatus(token: string) {
   return publicFetch<PublicQueueStatus>(`/p/${token}`);
 }
 
+// Get TV display data for waiting area (public)
+export async function getTvDisplayData(clinicId: string) {
+  return publicFetch<TvDisplayData>(`/tv/${clinicId}`);
+}
+
 // ============================================
 // Doctor Schedule Types & API
 // ============================================
 
-export type ShiftType = 'MORNING' | 'AFTERNOON';
+export type ShiftType = 'MORNING' | 'EVENING';
 export type TimeOffType = 'BREAK' | 'VACATION' | 'OTHER';
 
 export type ShiftTemplate = {
@@ -558,7 +624,7 @@ export type WeeklyShift = {
   dayOfWeek: number;
   shifts: {
     MORNING: boolean;
-    AFTERNOON: boolean;
+    EVENING: boolean;
   };
 };
 
@@ -579,7 +645,7 @@ export type DoctorScheduleData = {
   };
   shiftTemplate: {
     MORNING: ShiftTemplate;
-    AFTERNOON: ShiftTemplate;
+    EVENING: ShiftTemplate;
   };
   weekly: WeeklyShift[];
   timeOff: TimeOffEntry[];
@@ -589,13 +655,13 @@ export type UpdateSchedulePayload = {
   appointmentDurationMin?: number;
   shiftTemplate?: {
     MORNING?: { start: string; end: string };
-    AFTERNOON?: { start: string; end: string };
+    EVENING?: { start: string; end: string };
   };
   weekly?: Array<{
     dayOfWeek: number;
     shifts: {
       MORNING?: boolean;
-      AFTERNOON?: boolean;
+      EVENING?: boolean;
     };
   }>;
 };
@@ -936,6 +1002,136 @@ export async function getWaitTimesReport(from: string, to: string, doctorId?: st
     params.append('doctorId', doctorId);
   }
   return apiFetch<WaitTimesReportData>(`/v1/reports/wait-times?${params.toString()}`);
+}
+
+// ============================================
+// New Reports Types & API (Patients, Queue, Appointments, Doctor Check-ins)
+// ============================================
+
+// Patient Report Types
+export type PatientReportItem = {
+  id: string;
+  fullName: string;
+  phone: string | null;
+  email: string | null;
+  createdAt: string;
+  lastVisitDate: string | null;
+  totalVisits: number;
+};
+
+export type PatientsReportData = {
+  total: number;
+  patients: PatientReportItem[];
+};
+
+// Queue Report Types
+export type QueueReportItem = {
+  id: string;
+  date: string;
+  position: number;
+  patientName: string;
+  patientPhone: string | null;
+  doctorName: string;
+  doctorId: string;
+  status: string;
+  outcome: string | null;
+  source: string;
+  priority: string;
+  checkedInAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  waitMinutes: number | null;
+  consultMinutes: number | null;
+};
+
+export type QueueReportData = {
+  range: { from: string; to: string };
+  total: number;
+  entries: QueueReportItem[];
+};
+
+// Appointments Report Types
+export type AppointmentReportItem = {
+  id: string;
+  date: string;
+  time: string;
+  patientName: string;
+  patientPhone: string | null;
+  doctorName: string;
+  doctorId: string;
+  status: string;
+  reason: string | null;
+  createdAt: string;
+};
+
+export type AppointmentsReportData = {
+  range: { from: string; to: string };
+  total: number;
+  appointments: AppointmentReportItem[];
+};
+
+// Doctor Check-ins Report Types
+export type DoctorCheckinItem = {
+  id: string;
+  date: string;
+  doctorId: string;
+  doctorName: string;
+  checkInTime: string;
+  checkOutTime: string | null;
+  hoursWorked: number | null;
+};
+
+export type DoctorCheckinsData = {
+  range: { from: string; to: string };
+  total: number;
+  checkins: DoctorCheckinItem[];
+};
+
+// Get patients report
+export async function getPatientsReport(options?: {
+  from?: string;
+  to?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const params = new URLSearchParams();
+  if (options?.from) params.append('from', options.from);
+  if (options?.to) params.append('to', options.to);
+  if (options?.status) params.append('status', options.status);
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const queryString = params.toString();
+  return apiFetch<PatientsReportData>(`/v1/reports/patients${queryString ? `?${queryString}` : ''}`);
+}
+
+// Get queue report
+export async function getQueueReport(from: string, to: string, options?: {
+  doctorId?: string;
+  status?: string;
+}) {
+  const params = new URLSearchParams({ from, to });
+  if (options?.doctorId) params.append('doctorId', options.doctorId);
+  if (options?.status) params.append('status', options.status);
+  return apiFetch<QueueReportData>(`/v1/reports/queue?${params.toString()}`);
+}
+
+// Get appointments report
+export async function getAppointmentsReport(from: string, to: string, options?: {
+  doctorId?: string;
+  status?: string;
+}) {
+  const params = new URLSearchParams({ from, to });
+  if (options?.doctorId) params.append('doctorId', options.doctorId);
+  if (options?.status) params.append('status', options.status);
+  return apiFetch<AppointmentsReportData>(`/v1/reports/appointments?${params.toString()}`);
+}
+
+// Get doctor check-ins report
+export async function getDoctorCheckinsReport(from: string, to: string, doctorId?: string) {
+  const params = new URLSearchParams({ from, to });
+  if (doctorId) params.append('doctorId', doctorId);
+  return apiFetch<DoctorCheckinsData>(`/v1/reports/doctor-checkins?${params.toString()}`);
 }
 
 // ============================================

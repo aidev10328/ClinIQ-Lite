@@ -77,7 +77,7 @@ export type GeneratedSlot = {
   time: string;          // HH:MM format in clinic timezone
   startsAt: string;      // ISO datetime (UTC)
   endsAt: string;        // ISO datetime (UTC)
-  shift: 'MORNING' | 'AFTERNOON';
+  shift: 'MORNING' | 'EVENING';
   isAvailable: boolean;
 };
 
@@ -105,34 +105,19 @@ export class SlotsService {
    * Generate available appointment slots for a doctor on a specific date
    * Takes into account:
    * - Doctor's consultation duration
-   * - Shift templates (MORNING, AFTERNOON times)
+   * - Shift templates (MORNING, EVENING times)
    * - Weekly shifts (which shifts are enabled for each day)
    * - Time off (blocked dates)
    * - Existing appointments (to mark slots as unavailable)
+   *
+   * OPTIMIZED: All database queries run in parallel for faster loading
    */
   async generateSlots(
     clinicId: string,
     doctorId: string,
     date: string, // YYYY-MM-DD format
   ): Promise<SlotsGenerationResult> {
-    // 1. Get clinic for timezone
-    const clinic = await this.prisma.clinic.findUnique({
-      where: { id: clinicId },
-      select: { timezone: true },
-    });
-
-    const timezone = clinic?.timezone || 'UTC';
-
-    // 2. Get doctor with consultation duration
-    const doctor = await this.prisma.doctor.findFirst({
-      where: { id: doctorId, clinicId, isActive: true },
-    });
-
-    if (!doctor) {
-      throw new NotFoundException('Doctor not found');
-    }
-
-    // 2. Parse the date
+    // Parse the date first (no DB query needed)
     const targetDate = new Date(date + 'T00:00:00');
     if (isNaN(targetDate.getTime())) {
       throw new BadRequestException('Invalid date format. Use YYYY-MM-DD');
@@ -140,74 +125,90 @@ export class SlotsService {
 
     const dayOfWeek = targetDate.getDay(); // 0 = Sunday
 
-    // 3. Check if date is within a time off period
-    const timeOff = await this.prisma.doctorTimeOff.findFirst({
-      where: {
-        doctorId,
-        startDate: { lte: targetDate },
-        endDate: { gte: targetDate },
-      },
-    });
-
-    if (timeOff) {
-      // Doctor has time off on this date - return empty slots
-      return {
-        slots: [],
-        timezone,
-        doctorDurationMin: doctor.appointmentDurationMin,
-      };
-    }
-
-    // 4. Get shift templates for this doctor
-    const shiftTemplates = await this.prisma.doctorShiftTemplate.findMany({
-      where: { doctorId },
-    });
-
-    // 5. Get weekly shifts for this day
-    const weeklyShifts = await this.prisma.doctorWeeklyShift.findMany({
-      where: { doctorId, dayOfWeek, isEnabled: true },
-    });
-
-    if (weeklyShifts.length === 0) {
-      // No shifts enabled for this day
-      return {
-        slots: [],
-        timezone,
-        doctorDurationMin: doctor.appointmentDurationMin,
-      };
-    }
-
-    // 6. Build shift time ranges for enabled shifts
-    const enabledShifts = new Set(weeklyShifts.map(ws => ws.shiftType));
-    const shiftRanges: { shift: 'MORNING' | 'AFTERNOON'; start: string; end: string }[] = [];
-
-    for (const template of shiftTemplates) {
-      if (enabledShifts.has(template.shiftType)) {
-        shiftRanges.push({
-          shift: template.shiftType as 'MORNING' | 'AFTERNOON',
-          start: template.startTime,
-          end: template.endTime,
-        });
-      }
-    }
-
-    // 7. Get existing appointments for this doctor on this date
+    // Calculate date range for appointments query
     const startOfDay = new Date(targetDate);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(targetDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const existingAppointments = await this.prisma.appointment.findMany({
-      where: {
-        doctorId,
-        startsAt: { gte: startOfDay, lte: endOfDay },
-        status: { in: ['BOOKED', 'COMPLETED'] },
-      },
-      select: {
-        startsAt: true,
-        endsAt: true,
-      },
-    });
+    // OPTIMIZED: Run all database queries in parallel (6 queries → 1 round trip)
+    const [clinic, doctor, timeOff, shiftTemplates, weeklyShifts, existingAppointments] = await Promise.all([
+      // 1. Get clinic for timezone
+      this.prisma.clinic.findUnique({
+        where: { id: clinicId },
+        select: { timezone: true },
+      }),
+      // 2. Get doctor with consultation duration
+      this.prisma.doctor.findFirst({
+        where: { id: doctorId, clinicId, isActive: true },
+      }),
+      // 3. Check if date is within a time off period
+      this.prisma.doctorTimeOff.findFirst({
+        where: {
+          doctorId,
+          startDate: { lte: targetDate },
+          endDate: { gte: targetDate },
+        },
+      }),
+      // 4. Get shift templates for this doctor
+      this.prisma.doctorShiftTemplate.findMany({
+        where: { doctorId },
+      }),
+      // 5. Get weekly shifts for this day
+      this.prisma.doctorWeeklyShift.findMany({
+        where: { doctorId, dayOfWeek, isEnabled: true },
+      }),
+      // 6. Get existing appointments for this doctor on this date
+      this.prisma.appointment.findMany({
+        where: {
+          doctorId,
+          startsAt: { gte: startOfDay, lte: endOfDay },
+          status: { in: ['BOOKED', 'COMPLETED'] },
+        },
+        select: {
+          startsAt: true,
+          endsAt: true,
+        },
+      }),
+    ]);
+
+    const timezone = clinic?.timezone || 'UTC';
+
+    if (!doctor) {
+      throw new NotFoundException('Doctor not found');
+    }
+
+    // Check if doctor has time off on this date
+    if (timeOff) {
+      return {
+        slots: [],
+        timezone,
+        doctorDurationMin: doctor.appointmentDurationMin,
+      };
+    }
+
+    // Check if any shifts are enabled for this day
+    if (weeklyShifts.length === 0) {
+      return {
+        slots: [],
+        timezone,
+        doctorDurationMin: doctor.appointmentDurationMin,
+      };
+    }
+
+    // Build shift time ranges for enabled shifts
+    const enabledShifts = new Set(weeklyShifts.map(ws => ws.shiftType));
+    const shiftRanges: { shift: 'MORNING' | 'EVENING'; start: string; end: string }[] = [];
+
+    for (const template of shiftTemplates) {
+      if (enabledShifts.has(template.shiftType)) {
+        shiftRanges.push({
+          shift: template.shiftType as 'MORNING' | 'EVENING',
+          start: template.startTime,
+          end: template.endTime,
+        });
+      }
+    }
 
     // Create a set of booked time slots (in HH:MM format in clinic timezone)
     const bookedTimes = new Set<string>();
@@ -455,7 +456,7 @@ export class SlotsService {
             time: timeStr,
             startsAt: slotStart.toISOString(),
             endsAt: slotEnd.toISOString(),
-            shift: shiftType as 'MORNING' | 'AFTERNOON',
+            shift: shiftType as 'MORNING' | 'EVENING',
             isAvailable: !bookedTimes.has(timeStr),
           });
 

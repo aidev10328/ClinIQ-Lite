@@ -172,7 +172,7 @@ async function main() {
       },
     });
 
-    // Afternoon session: 14:00 - 17:00
+    // Evening session: 14:00 - 17:00
     await prisma.doctorSchedule.upsert({
       where: {
         doctorId_dayOfWeek_startTime_endTime: {
@@ -220,24 +220,24 @@ async function main() {
   });
   console.log('   - Morning: 10:30-13:00');
 
-  // Afternoon: 16:00 - 20:30
+  // Evening: 16:00 - 20:30
   await prisma.doctorShiftTemplate.upsert({
     where: {
       doctorId_shiftType: {
         doctorId: demoDoctor.id,
-        shiftType: 'AFTERNOON',
+        shiftType: 'EVENING',
       },
     },
     update: {},
     create: {
       clinicId: demoClinic.id,
       doctorId: demoDoctor.id,
-      shiftType: 'AFTERNOON',
+      shiftType: 'EVENING',
       startTime: '16:00',
       endTime: '20:30',
     },
   });
-  console.log('   - Afternoon: 16:00-20:30');
+  console.log('   - Evening: 16:00-20:30');
 
   // ============================================
   // 8. Create Doctor Weekly Shifts
@@ -245,10 +245,10 @@ async function main() {
   console.log('\n8. Creating doctor weekly shifts...');
 
   const weekDayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const shiftTypes: Array<'MORNING' | 'AFTERNOON'> = ['MORNING', 'AFTERNOON'];
+  const shiftTypes: Array<'MORNING' | 'EVENING'> = ['MORNING', 'EVENING'];
 
   for (let dayOfWeek = 0; dayOfWeek <= 6; dayOfWeek++) {
-    // Mon-Fri: Morning + Afternoon enabled
+    // Mon-Fri: Morning + Evening enabled
     // Sat-Sun: All disabled
     const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
@@ -275,7 +275,7 @@ async function main() {
     }
 
     if (isWeekday) {
-      console.log(`   - ${weekDayNames[dayOfWeek]}: Morning ✓, Afternoon ✓, Night ✗`);
+      console.log(`   - ${weekDayNames[dayOfWeek]}: Morning ✓, Evening ✓, Night ✗`);
     } else {
       console.log(`   - ${weekDayNames[dayOfWeek]}: All shifts disabled`);
     }
@@ -368,8 +368,8 @@ async function main() {
   console.log('\nDemo Data:');
   console.log(`  Clinic: ${demoClinic.name}`);
   console.log(`  Doctor: ${demoDoctor.fullName}`);
-  console.log('  Shift Templates: Morning, Afternoon, Night');
-  console.log('  Weekly Schedule: Mon-Fri (Morning + Afternoon)');
+  console.log('  Shift Templates: Morning, Evening, Night');
+  console.log('  Weekly Schedule: Mon-Fri (Morning + Evening)');
   console.log('  Time Off: Feb 4, 10, 11-12, 24-25');
   console.log(`  Patient: ${demoPatient.fullName}`);
   console.log('========================================\n');

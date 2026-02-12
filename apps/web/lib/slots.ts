@@ -2,7 +2,7 @@
 
 import type { DoctorSchedule, Appointment, GeneratedSlot } from './api';
 
-export type SlotPeriod = 'morning' | 'afternoon';
+export type SlotPeriod = 'morning' | 'evening';
 
 export type Slot = {
   id: string;
@@ -11,30 +11,31 @@ export type Slot = {
   endsAt: Date;          // Full datetime
   period: SlotPeriod;
   isBooked: boolean;
+  isPast?: boolean;      // True if slot time is before current clinic time
   appointment?: Appointment;
 };
 
 export type SlotsByPeriod = {
   morning: Slot[];
-  afternoon: Slot[];
+  evening: Slot[];
 };
 
 // Period definitions (in 24-hour format)
 const PERIOD_RANGES = {
   morning: { start: 0, end: 12 },     // 00:00 - 11:59
-  afternoon: { start: 12, end: 24 },  // 12:00 - 23:59
+  evening: { start: 12, end: 24 },  // 12:00 - 23:59
 };
 
 export function getPeriodLabel(period: SlotPeriod): string {
   switch (period) {
     case 'morning': return 'Morning';
-    case 'afternoon': return 'Afternoon';
+    case 'evening': return 'Evening';
   }
 }
 
 export function getPeriodForTime(hour: number): SlotPeriod {
   if (hour < 12) return 'morning';
-  return 'afternoon';
+  return 'evening';
 }
 
 // Parse HH:MM time string to hours and minutes
@@ -181,7 +182,7 @@ export function mergeAppointmentsIntoSlots(
 export function groupSlotsByPeriod(slots: Slot[]): SlotsByPeriod {
   const result: SlotsByPeriod = {
     morning: [],
-    afternoon: [],
+    evening: [],
   };
 
   for (const slot of slots) {
@@ -189,6 +190,19 @@ export function groupSlotsByPeriod(slots: Slot[]): SlotsByPeriod {
   }
 
   return result;
+}
+
+/**
+ * Mark slots as past based on current clinic time
+ * @param slots - Array of slots
+ * @param clinicNow - Current time in clinic timezone
+ */
+export function markPastSlots(slots: Slot[], clinicNow: Date): Slot[] {
+  const nowTime = clinicNow.getTime();
+  return slots.map(slot => ({
+    ...slot,
+    isPast: slot.startsAt.getTime() < nowTime,
+  }));
 }
 
 /**

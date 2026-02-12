@@ -25,7 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Redirect non-admins
   useEffect(() => {
     if (!loading && (!user || user.role !== 'ADMIN')) {
-      router.replace('/app/dashboard');
+      router.replace('/app/queue');
     }
   }, [user, loading, router]);
 
@@ -104,7 +104,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </button>
             </div>
             <Link
-              href="/app/dashboard"
+              href="/app/queue"
               className="mt-3 flex items-center gap-2 text-xs text-gray-400 hover:text-white"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

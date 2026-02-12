@@ -20,11 +20,11 @@ const PERIOD_COLORS = {
     header: 'bg-amber-100 text-amber-800',
     icon: '🌅',
   },
-  afternoon: {
+  evening: {
     bg: 'bg-blue-50',
     border: 'border-blue-200',
     header: 'bg-blue-100 text-blue-800',
-    icon: '☀️',
+    icon: '🌆',
   },
 };
 

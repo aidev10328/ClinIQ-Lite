@@ -136,7 +136,20 @@ export default function SlotCard({ slot, onBook, onCancel, onReschedule, readOnl
     );
   }
 
-  // Open slot
+  // Open slot - check if past
+  if (slot.isPast) {
+    // Past slot: show grayed out, not bookable
+    return (
+      <div className="w-full bg-gray-50 border border-gray-200 rounded p-1.5 opacity-50">
+        <div className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+          <span className="text-[11px] font-medium text-gray-500">{timeDisplay}</span>
+          <span className="text-[10px] text-gray-400 ml-auto">Past</span>
+        </div>
+      </div>
+    );
+  }
+
   if (readOnly) {
     // Read-only: just show the slot without click action
     return (

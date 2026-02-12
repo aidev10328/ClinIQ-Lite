@@ -9,7 +9,7 @@ import BookAppointmentModal from '../../../components/appointments/BookAppointme
 import { useClinicTime } from '../../../lib/hooks/useQueueData';
 import {
   listDoctors,
-  getDoctor,
+  getMyAssignedDoctors,
   cancelAppointment,
   rescheduleAppointment,
   generateDoctorSlots,
@@ -25,10 +25,11 @@ import {
   formatDateDisplay,
   formatDateForApi,
   convertBackendSlotToFrontend,
+  markPastSlots,
 } from '../../../lib/slots';
 
 export default function AppointmentsPage() {
-  const { clinicId, isManager, clinicRole } = useAuth();
+  const { clinicId, isManager, clinicRole, doctorId: authDoctorId } = useAuth();
 
   // Check if user is doctor-only (not manager/staff)
   const isDoctorOnly = clinicRole === 'CLINIC_DOCTOR' && !isManager;
@@ -74,7 +75,7 @@ export default function AppointmentsPage() {
   // Slots
   const [slotsByPeriod, setSlotsByPeriod] = useState<SlotsByPeriod>({
     morning: [],
-    afternoon: [],
+    evening: [],
   });
   const [totalSlots, setTotalSlots] = useState({ open: 0, booked: 0 });
 
@@ -83,25 +84,85 @@ export default function AppointmentsPage() {
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
   // Load doctors (only licensed doctors can accept appointments)
+  // Staff can only see their assigned doctors
+  const isStaff = clinicRole === 'CLINIC_STAFF';
+
   useEffect(() => {
     if (!clinicId) return;
 
-    async function loadDoctors() {
+    async function loadDoctorsData() {
       setLoading(true);
-      const { data, error } = await listDoctors({ licensedOnly: true });
-      if (error) {
-        setError(error.message);
-      } else if (data && data.length > 0) {
-        setDoctors(data);
-        setSelectedDoctorId(data[0].id);
+      try {
+        // For staff, load both lists in parallel for faster loading
+        if (isStaff) {
+          const [doctorsResult, assignedResult] = await Promise.all([
+            listDoctors({ licensedOnly: true }),
+            getMyAssignedDoctors(),
+          ]);
+
+          if (doctorsResult.error) {
+            setError(doctorsResult.error.message);
+            setLoading(false);
+            return;
+          }
+
+          const allDoctors = doctorsResult.data || [];
+          const assignedDoctors = assignedResult.data || [];
+
+          let filteredDoctors: Doctor[] = [];
+          if (assignedDoctors.length > 0) {
+            const assignedIds = new Set(assignedDoctors.map(d => d.id));
+            filteredDoctors = allDoctors.filter(d => assignedIds.has(d.id));
+          }
+
+          if (filteredDoctors.length > 0) {
+            setDoctors(filteredDoctors);
+            setSelectedDoctorId(filteredDoctors[0].id);
+            // Set selected doctor directly from list to avoid extra API call
+            setSelectedDoctor(filteredDoctors[0]);
+          } else {
+            setDoctors([]);
+            setSelectedDoctorId(null);
+          }
+          setLoading(false);
+          return;
+        }
+
+        // For non-staff users
+        const { data, error } = await listDoctors({ licensedOnly: true });
+        if (error) {
+          setError(error.message);
+          setLoading(false);
+          return;
+        }
+
+        let filteredDoctors = data || [];
+
+        // For doctors, filter to only their own doctor record
+        if (isDoctorOnly && authDoctorId) {
+          filteredDoctors = filteredDoctors.filter(d => d.id === authDoctorId);
+        }
+
+        if (filteredDoctors.length > 0) {
+          setDoctors(filteredDoctors);
+          setSelectedDoctorId(filteredDoctors[0].id);
+          // Set selected doctor directly from list to avoid extra API call
+          setSelectedDoctor(filteredDoctors[0]);
+        } else {
+          setDoctors([]);
+          setSelectedDoctorId(null);
+        }
+      } catch (err) {
+        setError('Failed to load doctors');
       }
       setLoading(false);
     }
 
-    loadDoctors();
-  }, [clinicId]);
+    loadDoctorsData();
+  }, [clinicId, isStaff, isDoctorOnly, authDoctorId]);
 
-  // Load doctor details with schedules when selection changes
+  // Load doctor schedule data when selection changes
+  // Note: selectedDoctor is set directly from doctors list to avoid extra API call
   useEffect(() => {
     if (!selectedDoctorId) {
       setSelectedDoctor(null);
@@ -109,27 +170,28 @@ export default function AppointmentsPage() {
       return;
     }
 
-    async function loadDoctorDetails() {
-      const [doctorResult, scheduleResult] = await Promise.all([
-        getDoctor(selectedDoctorId!),
-        getDoctorScheduleData(selectedDoctorId!),
-      ]);
-      if (doctorResult.data) {
-        setSelectedDoctor(doctorResult.data);
-      }
+    // Update selected doctor from doctors list (no API call needed)
+    const doctorFromList = doctors.find(d => d.id === selectedDoctorId);
+    if (doctorFromList) {
+      setSelectedDoctor(doctorFromList);
+    }
+
+    // Only fetch schedule data (the only thing not in the list)
+    async function loadScheduleData() {
+      const scheduleResult = await getDoctorScheduleData(selectedDoctorId!);
       if (scheduleResult.data) {
         setScheduleData(scheduleResult.data);
       }
     }
 
-    loadDoctorDetails();
-  }, [selectedDoctorId]);
+    loadScheduleData();
+  }, [selectedDoctorId, doctors]);
 
   // Load slots when doctor or date changes
   // Appointment data is now included directly in slot response from backend
   const loadSlots = useCallback(async () => {
     if (!selectedDoctorId || !selectedDate) {
-      setSlotsByPeriod({ morning: [], afternoon: [] });
+      setSlotsByPeriod({ morning: [], evening: [] });
       setTotalSlots({ open: 0, booked: 0 });
       return;
     }
@@ -141,19 +203,26 @@ export default function AppointmentsPage() {
 
     if (slotsResult.error || !slotsResult.data) {
       setSlotsLoading(false);
-      setSlotsByPeriod({ morning: [], afternoon: [] });
+      setSlotsByPeriod({ morning: [], evening: [] });
       setTotalSlots({ open: 0, booked: 0 });
       return;
     }
 
     // Convert backend slots to frontend format (appointment data is already included)
-    const slots: Slot[] = slotsResult.data.slots.map(bs => convertBackendSlotToFrontend(bs, selectedDate));
+    let slots: Slot[] = slotsResult.data.slots.map(bs => convertBackendSlotToFrontend(bs, selectedDate));
+
+    // Mark past slots (use server time for accurate comparison)
+    if (clinicTime?.serverTime) {
+      const clinicNow = new Date(clinicTime.serverTime);
+      slots = markPastSlots(slots, clinicNow);
+    }
+
     const grouped = groupSlotsByPeriod(slots);
 
     setSlotsByPeriod(grouped);
     setTotalSlots(countSlots(slots));
     setSlotsLoading(false);
-  }, [selectedDoctorId, selectedDate]);
+  }, [selectedDoctorId, selectedDate, clinicTime?.serverTime]);
 
   useEffect(() => {
     loadSlots();
@@ -287,10 +356,10 @@ export default function AppointmentsPage() {
                     <span className="text-gray-600">{scheduleData.shiftTemplate.MORNING.start} - {scheduleData.shiftTemplate.MORNING.end}</span>
                   </div>
                 )}
-                {scheduleData.shiftTemplate.AFTERNOON && (
+                {scheduleData.shiftTemplate.EVENING && (
                   <div className="flex items-center justify-between text-[9px]">
-                    <span className="text-blue-600">Afternoon</span>
-                    <span className="text-gray-600">{scheduleData.shiftTemplate.AFTERNOON.start} - {scheduleData.shiftTemplate.AFTERNOON.end}</span>
+                    <span className="text-blue-600">Evening</span>
+                    <span className="text-gray-600">{scheduleData.shiftTemplate.EVENING.start} - {scheduleData.shiftTemplate.EVENING.end}</span>
                   </div>
                 )}
               </div>
@@ -303,7 +372,7 @@ export default function AppointmentsPage() {
                     const daySchedule = scheduleData.weekly.find(w => w.dayOfWeek === idx);
                     const hasShifts = daySchedule && (
                       (daySchedule.shifts.MORNING && scheduleData.shiftTemplate.MORNING) ||
-                      (daySchedule.shifts.AFTERNOON && scheduleData.shiftTemplate.AFTERNOON)
+                      (daySchedule.shifts.EVENING && scheduleData.shiftTemplate.EVENING)
                     );
                     return (
                       <div
@@ -412,8 +481,8 @@ export default function AppointmentsPage() {
                   readOnly={readOnlyMode}
                 />
                 <SlotColumn
-                  period="afternoon"
-                  slots={slotsByPeriod.afternoon}
+                  period="evening"
+                  slots={slotsByPeriod.evening}
                   onBook={handleOpenBooking}
                   onCancel={handleCancel}
                   onReschedule={handleReschedule}

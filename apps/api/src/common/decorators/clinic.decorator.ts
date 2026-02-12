@@ -16,6 +16,22 @@ export const ClinicRole = createParamDecorator(
   },
 );
 
+// Get clinic user ID from request (set by ClinicGuard)
+export const ClinicUserId = createParamDecorator(
+  (data: unknown, ctx: ExecutionContext): string | null => {
+    const request = ctx.switchToHttp().getRequest();
+    return request.clinicUserId || null;
+  },
+);
+
+// Get doctor ID from request (set by ClinicGuard for CLINIC_DOCTOR role)
+export const DoctorId = createParamDecorator(
+  (data: unknown, ctx: ExecutionContext): string | null => {
+    const request = ctx.switchToHttp().getRequest();
+    return request.doctorId || null;
+  },
+);
+
 // Get current user from request
 export const CurrentUser = createParamDecorator(
   (data: unknown, ctx: ExecutionContext) => {

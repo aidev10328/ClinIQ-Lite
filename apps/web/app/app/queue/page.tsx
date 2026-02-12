@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../../components/AuthProvider';
 import DoctorSelector from '../../../components/appointments/DoctorSelector';
 import QueueCard from '../../../components/queue/QueueCard';
@@ -19,7 +19,18 @@ import {
   queueKeys,
 } from '../../../lib/hooks/useQueueData';
 import { usePageVisibility } from '../../../lib/hooks/usePageVisibility';
-import { getMyAssignedDoctors, type QueueEntry, type QueueStatus, type Appointment, type AssignedDoctor } from '../../../lib/api';
+import {
+  getMyAssignedDoctors,
+  issueQueueToken,
+  getDoctorCheckInStatus,
+  doctorCheckIn as apiDoctorCheckIn,
+  doctorCheckOut as apiDoctorCheckOut,
+  type QueueEntry,
+  type QueueStatus,
+  type Appointment,
+  type AssignedDoctor,
+  type DoctorCheckInStatus,
+} from '../../../lib/api';
 
 // Format time in clinic timezone
 function formatTimeInTimezone(isoString: string | undefined | null, timezone: string): string {
@@ -180,12 +191,42 @@ export default function QueuePage() {
   // Doctor selection state
   const [selectedDoctorId, setSelectedDoctorId] = useState<string | null>(null);
 
-  // Doctor check-in state with timestamps
-  const [doctorCheckIn, setDoctorCheckIn] = useState<{
-    isCheckedIn: boolean;
-    checkInTime: string | null;
-    checkOutTime: string | null;
-  }>({ isCheckedIn: false, checkInTime: null, checkOutTime: null });
+  // Doctor check-in status query (fetched from server)
+  const { data: doctorCheckIn = { isCheckedIn: false, checkInTime: null, checkOutTime: null } } = useQuery({
+    queryKey: ['doctorCheckIn', selectedDoctorId],
+    queryFn: async () => {
+      if (!selectedDoctorId) return { isCheckedIn: false, checkInTime: null, checkOutTime: null };
+      const { data, error } = await getDoctorCheckInStatus(selectedDoctorId);
+      if (error) throw new Error(error.message);
+      return data || { isCheckedIn: false, checkInTime: null, checkOutTime: null };
+    },
+    enabled: !!selectedDoctorId,
+    refetchInterval: isPageVisible ? 30000 : false, // Refresh every 30 seconds when visible
+  });
+
+  // Check-in mutation
+  const checkInMutation = useMutation({
+    mutationFn: async (doctorId: string) => {
+      const { data, error } = await apiDoctorCheckIn(doctorId);
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['doctorCheckIn', selectedDoctorId] });
+    },
+  });
+
+  // Check-out mutation
+  const checkOutMutation = useMutation({
+    mutationFn: async (doctorId: string) => {
+      const { data, error } = await apiDoctorCheckOut(doctorId);
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['doctorCheckIn', selectedDoctorId] });
+    },
+  });
 
   // Modal state
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
@@ -194,6 +235,10 @@ export default function QueuePage() {
   const [queueSearch, setQueueSearch] = useState('');
   const [scheduleSearch, setScheduleSearch] = useState('');
   const [completedSearch, setCompletedSearch] = useState('');
+
+  // Status link states
+  const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
+  const [isIssuingToken, setIsIssuingToken] = useState<string | null>(null);
 
   // Get clinic time (current date in clinic timezone)
   const { data: clinicTime, isLoading: clinicTimeLoading } = useClinicTime();
@@ -204,7 +249,7 @@ export default function QueuePage() {
   const { data: allDoctors = [], isLoading: doctorsLoading } = useDoctors();
 
   // Get assigned doctors for staff role filtering
-  const { data: assignedDoctors = [] } = useQuery({
+  const { data: assignedDoctors = [], isLoading: assignedDoctorsLoading } = useQuery({
     queryKey: ['myAssignedDoctors'],
     queryFn: async () => {
       const { data, error } = await getMyAssignedDoctors();
@@ -215,18 +260,24 @@ export default function QueuePage() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // For staff, we need to wait for assigned doctors to load
+  const isStaff = clinicRole === 'CLINIC_STAFF';
+  const doctorsReady = isStaff ? !assignedDoctorsLoading : !doctorsLoading;
+
   // Filter doctors based on role:
   // - Managers see all licensed doctors
   // - Staff see only their assigned doctors
   // - Doctors see all licensed doctors (but only manage their own queue)
   const doctors = useMemo(() => {
     const licensedDoctors = allDoctors.filter(d => d.hasLicense === true);
-    if (clinicRole === 'CLINIC_STAFF' && assignedDoctors.length > 0) {
+    if (isStaff) {
+      // For staff, only return doctors after assigned doctors have loaded
+      if (assignedDoctorsLoading) return [];
       const assignedIds = new Set(assignedDoctors.map(d => d.id));
       return licensedDoctors.filter(d => assignedIds.has(d.id));
     }
     return licensedDoctors;
-  }, [allDoctors, clinicRole, assignedDoctors]);
+  }, [allDoctors, isStaff, assignedDoctors, assignedDoctorsLoading]);
 
   const { data: selectedDoctor } = useDoctor(selectedDoctorId);
   const { data: queueEntries = [], isLoading: queueLoading, isFetching: queueFetching } = useQueueEntries(
@@ -243,16 +294,12 @@ export default function QueuePage() {
   const noShowMutation = useMarkNoShow(selectedDoctorId);
 
   // Auto-select first licensed doctor when loaded
-  const handleDoctorsLoaded = useCallback(() => {
-    if (doctors.length > 0 && !selectedDoctorId) {
+  // Use effect to avoid setting state during render
+  useEffect(() => {
+    if (doctorsReady && doctors.length > 0 && !selectedDoctorId) {
       setSelectedDoctorId(doctors[0].id);
     }
-  }, [doctors, selectedDoctorId]);
-
-  // Effect to auto-select
-  if (doctors.length > 0 && !selectedDoctorId) {
-    setSelectedDoctorId(doctors[0].id);
-  }
+  }, [doctorsReady, doctors, selectedDoctorId]);
 
   // Derived data - categorize queue entries by status
   const queuedEntries = queueEntries.filter((e) => e.status === 'QUEUED');
@@ -326,7 +373,9 @@ export default function QueuePage() {
   };
 
   // Handler for doctor check-in/out
-  const handleDoctorCheckInOut = () => {
+  const handleDoctorCheckInOut = async () => {
+    if (!selectedDoctorId) return;
+
     if (doctorCheckIn.isCheckedIn) {
       // Prevent checkout if patient is still with doctor
       if (withDoctorEntries.length > 0) {
@@ -334,18 +383,18 @@ export default function QueuePage() {
         return;
       }
       // Checking out
-      setDoctorCheckIn({
-        isCheckedIn: false,
-        checkInTime: doctorCheckIn.checkInTime,
-        checkOutTime: new Date().toISOString(),
-      });
+      try {
+        await checkOutMutation.mutateAsync(selectedDoctorId);
+      } catch (error: any) {
+        alert(error.message || 'Failed to check out');
+      }
     } else {
       // Checking in
-      setDoctorCheckIn({
-        isCheckedIn: true,
-        checkInTime: new Date().toISOString(),
-        checkOutTime: null,
-      });
+      try {
+        await checkInMutation.mutateAsync(selectedDoctorId);
+      } catch (error: any) {
+        alert(error.message || 'Failed to check in');
+      }
     }
   };
 
@@ -384,7 +433,38 @@ export default function QueuePage() {
     handleRefresh();
   };
 
-  const isLoading = doctorsLoading || queueLoading || clinicTimeLoading;
+  // Handler to generate and copy patient status link
+  const handleCopyStatusLink = async (entryId: string) => {
+    setIsIssuingToken(entryId);
+    try {
+      const { data, error } = await issueQueueToken(entryId);
+      if (error || !data) {
+        console.error('Failed to generate status link:', error);
+        alert('Failed to generate status link');
+        return;
+      }
+
+      // Build the full URL
+      const baseUrl = window.location.origin;
+      const fullUrl = `${baseUrl}${data.urlPath}`;
+
+      // Copy to clipboard
+      await navigator.clipboard.writeText(fullUrl);
+      setCopiedEntryId(entryId);
+
+      // Clear copied indicator after 2 seconds
+      setTimeout(() => {
+        setCopiedEntryId(null);
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy link:', err);
+      alert('Failed to copy link to clipboard');
+    } finally {
+      setIsIssuingToken(null);
+    }
+  };
+
+  const isLoading = doctorsLoading || queueLoading || clinicTimeLoading || (isStaff && assignedDoctorsLoading);
   const isRefreshing = queueFetching && !queueLoading;
 
   if (isLoading) {
@@ -411,6 +491,18 @@ export default function QueuePage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
           </button>
+          <a
+            href={`/tv/${clinicId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-primary-600 bg-primary-50 hover:bg-primary-100 rounded-lg transition-colors"
+            title="Open TV Display for Waiting Area"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            TV View
+          </a>
         </div>
 
         {/* Summary chips - inline */}
@@ -446,9 +538,8 @@ export default function QueuePage() {
             selectedDoctorId={selectedDoctorId}
             onSelect={(id) => {
               setSelectedDoctorId(id);
-              setDoctorCheckIn({ isCheckedIn: false, checkInTime: null, checkOutTime: null });
             }}
-            loading={doctorsLoading}
+            loading={doctorsLoading || (isStaff && assignedDoctorsLoading)}
             showTitle={true}
           />
         </div>
@@ -594,6 +685,32 @@ export default function QueuePage() {
                           </Tooltip>
                         ) : null}
                       </span>
+                      {/* Status Link */}
+                      <button
+                        onClick={() => handleCopyStatusLink(entry.id)}
+                        disabled={isIssuingToken === entry.id}
+                        className={`p-0.5 rounded flex-shrink-0 transition-colors ${
+                          copiedEntryId === entry.id
+                            ? 'text-green-600 bg-green-50'
+                            : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
+                        }`}
+                        title={copiedEntryId === entry.id ? 'Link copied!' : 'Copy patient status link'}
+                      >
+                        {isIssuingToken === entry.id ? (
+                          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        ) : copiedEntryId === entry.id ? (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        )}
+                      </button>
                       {/* Actions */}
                       {canManageQueue && (
                         <div className="flex gap-0.5 flex-shrink-0 w-24 justify-end">
@@ -681,6 +798,32 @@ export default function QueuePage() {
                           </Tooltip>
                         ) : null}
                       </span>
+                      {/* Status Link */}
+                      <button
+                        onClick={() => handleCopyStatusLink(entry.id)}
+                        disabled={isIssuingToken === entry.id}
+                        className={`p-0.5 rounded flex-shrink-0 transition-colors ${
+                          copiedEntryId === entry.id
+                            ? 'text-green-600 bg-green-50'
+                            : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
+                        }`}
+                        title={copiedEntryId === entry.id ? 'Link copied!' : 'Copy patient status link'}
+                      >
+                        {isIssuingToken === entry.id ? (
+                          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        ) : copiedEntryId === entry.id ? (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        )}
+                      </button>
                       {/* Actions */}
                       {canManageQueue && canSendToDoctor && (
                         <div className="flex gap-0.5 flex-shrink-0 w-24 justify-end">
@@ -710,15 +853,19 @@ export default function QueuePage() {
                 </div>
                 <button
                   onClick={handleDoctorCheckInOut}
+                  disabled={doctorCheckIn.isCheckedIn && withDoctorEntries.length > 0}
+                  title={doctorCheckIn.isCheckedIn && withDoctorEntries.length > 0 ? 'Complete consultation first' : ''}
                   className={`text-[9px] py-0.5 px-2 rounded font-medium flex items-center gap-1 transition-colors ${
                     doctorCheckIn.isCheckedIn
-                      ? 'bg-red-500 text-white hover:bg-red-600'
+                      ? withDoctorEntries.length > 0
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-red-500 text-white hover:bg-red-600'
                       : 'bg-emerald-500 text-white hover:bg-emerald-600'
                   }`}
                 >
                   {doctorCheckIn.isCheckedIn ? (
                     <>
-                      <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${withDoctorEntries.length > 0 ? 'bg-gray-400' : 'bg-white'}`}></span>
                       Check Out
                     </>
                   ) : (
@@ -811,6 +958,32 @@ export default function QueuePage() {
                                 {entry.priority}
                               </span>
                             )}
+                            {/* Status Link */}
+                            <button
+                              onClick={() => handleCopyStatusLink(entry.id)}
+                              disabled={isIssuingToken === entry.id}
+                              className={`p-1 rounded transition-colors ${
+                                copiedEntryId === entry.id
+                                  ? 'text-green-600 bg-green-50'
+                                  : 'text-gray-400 hover:text-primary-600 hover:bg-primary-50'
+                              }`}
+                              title={copiedEntryId === entry.id ? 'Link copied!' : 'Copy patient status link'}
+                            >
+                              {isIssuingToken === entry.id ? (
+                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                              ) : copiedEntryId === entry.id ? (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                </svg>
+                              )}
+                            </button>
                           </div>
                           <p className="text-sm font-semibold text-gray-800">{entry.patient.fullName}</p>
                           {entry.reason && (

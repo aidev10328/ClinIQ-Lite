@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useNoShowsReport } from '../../../../lib/hooks/useReports';
-import { useDoctors } from '../../../../lib/hooks/useDoctors';
+import { useFilteredDoctors } from '../../../../lib/hooks/useDoctors';
 
 function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
@@ -31,7 +31,7 @@ export default function NoShowsReportPage() {
   const [doctorId, setDoctorId] = useState<string>('');
 
   const { data, isLoading, error } = useNoShowsReport(from, to, doctorId || undefined);
-  const { data: doctors } = useDoctors();
+  const { data: doctors } = useFilteredDoctors();
 
   // Calculate overall stats
   const totalPatients = data?.byDow.reduce((sum, d) => sum + d.total, 0) || 0;

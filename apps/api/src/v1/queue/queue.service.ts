@@ -215,13 +215,14 @@ export class QueueService {
         orderBy: { position: 'desc' },
       });
       effectivePosition = (lastEmergency?.position || 0) + 1;
-      // Shift normal entries down
+      // Shift all non-emergency entries at or after this position
       await this.prisma.queueEntry.updateMany({
         where: {
           clinicId,
           doctorId: data.doctorId,
           queueDate: today,
-          priority: 'NORMAL',
+          priority: { not: 'EMERGENCY' },
+          position: { gte: effectivePosition },
           status: { in: ['QUEUED', 'WAITING'] },
         },
         data: { position: { increment: 1 } },
@@ -355,8 +356,8 @@ export class QueueService {
       include: {
         queueEntry: {
           include: {
-            doctor: { select: { fullName: true } },
-            clinic: { select: { name: true } },
+            doctor: { select: { fullName: true, appointmentDurationMin: true } },
+            clinic: { select: { name: true, timezone: true } },
           },
         },
       },
@@ -376,7 +377,7 @@ export class QueueService {
 
     const entry = publicToken.queueEntry;
 
-    // Count how many people are ahead
+    // Count how many people are ahead (in QUEUED or WAITING status)
     const ahead = await this.prisma.queueEntry.count({
       where: {
         clinicId: entry.clinicId,
@@ -387,13 +388,356 @@ export class QueueService {
       },
     });
 
+    // Check if doctor is currently seeing a patient (WITH_DOCTOR status)
+    const patientWithDoctor = await this.prisma.queueEntry.findFirst({
+      where: {
+        clinicId: entry.clinicId,
+        doctorId: entry.doctorId,
+        queueDate: entry.queueDate,
+        status: 'WITH_DOCTOR',
+      },
+      select: { startedAt: true },
+    });
+
+    const isDoctorBusy = !!patientWithDoctor;
+    const consultationDurationMin = entry.doctor.appointmentDurationMin || 15;
+
+    // Calculate estimated wait time (only meaningful when doctor has started seeing patients)
+    // Formula: (patients ahead * consultation duration) + remaining time for current patient
+    let estimatedWaitMinutes: number | null = null;
+    if (entry.status !== 'COMPLETED' && entry.status !== 'CANCELLED') {
+      if (isDoctorBusy && patientWithDoctor?.startedAt) {
+        // Calculate how long current patient has been with doctor
+        const elapsedMs = Date.now() - new Date(patientWithDoctor.startedAt).getTime();
+        const elapsedMin = Math.floor(elapsedMs / 60000);
+        const remainingForCurrent = Math.max(0, consultationDurationMin - elapsedMin);
+        estimatedWaitMinutes = remainingForCurrent + (ahead * consultationDurationMin);
+      } else if (ahead > 0) {
+        // Doctor not currently busy but there are people ahead
+        estimatedWaitMinutes = ahead * consultationDurationMin;
+      } else {
+        // No one ahead
+        estimatedWaitMinutes = 0;
+      }
+    }
+
     return {
       clinicName: entry.clinic.name,
       doctorName: entry.doctor.fullName,
       position: entry.position,
       status: entry.status,
+      source: entry.source, // WALKIN or APPOINTMENT
       peopleAhead: ahead,
       checkedInAt: entry.checkedInAt,
+      isDoctorBusy,
+      consultationDurationMin,
+      estimatedWaitMinutes,
+    };
+  }
+
+  // Get TV display data for waiting area (public endpoint)
+  async getTvDisplayData(clinicId: string) {
+    // Verify clinic exists
+    const clinic = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { id: true, name: true, timezone: true },
+    });
+
+    if (!clinic) {
+      throw new NotFoundException('Clinic not found');
+    }
+
+    const timezone = clinic.timezone || 'UTC';
+
+    // Get today's date in clinic timezone
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone });
+    const todayDate = new Date(todayStr + 'T00:00:00.000Z');
+
+    // Get all active doctors for this clinic
+    const doctors = await this.prisma.doctor.findMany({
+      where: { clinicId, isActive: true },
+      select: {
+        id: true,
+        fullName: true,
+        appointmentDurationMin: true,
+      },
+      orderBy: { fullName: 'asc' },
+    });
+
+    // Get today's check-ins to determine doctor status
+    const todayCheckIns = await this.prisma.doctorDailyCheckIn.findMany({
+      where: {
+        clinicId,
+        checkInDate: todayDate,
+        checkOutTime: null, // Only those still checked in
+      },
+      select: { doctorId: true },
+    });
+
+    const checkedInDoctorIds = new Set(todayCheckIns.map(c => c.doctorId));
+
+    // Get all active queue entries for today (QUEUED, WAITING, WITH_DOCTOR)
+    const queueEntries = await this.prisma.queueEntry.findMany({
+      where: {
+        clinicId,
+        queueDate: todayDate,
+        status: { in: ['QUEUED', 'WAITING', 'WITH_DOCTOR'] },
+      },
+      include: {
+        patient: { select: { fullName: true } },
+        doctor: { select: { id: true, fullName: true, appointmentDurationMin: true } },
+      },
+      orderBy: [{ doctorId: 'asc' }, { priority: 'desc' }, { position: 'asc' }],
+    });
+
+    // Group entries by doctor and calculate wait times (include all doctors with patients)
+    const doctorQueues = doctors.map(doctor => {
+      const doctorEntries = queueEntries.filter(e => e.doctorId === doctor.id);
+      const consultationDuration = doctor.appointmentDurationMin || 15;
+      const isCheckedIn = checkedInDoctorIds.has(doctor.id);
+
+      // Find current patient with doctor
+      const currentPatient = doctorEntries.find(e => e.status === 'WITH_DOCTOR');
+
+      // Calculate wait times for each patient (only if doctor is checked in)
+      const patients = doctorEntries.map((entry, index) => {
+        let estimatedWaitMin: number | null = null;
+
+        // Only calculate wait times if doctor is checked in
+        if (isCheckedIn) {
+          if (entry.status === 'WITH_DOCTOR') {
+            estimatedWaitMin = 0; // Currently being seen
+          } else {
+            // Count patients ahead (with lower position in QUEUED/WAITING status)
+            const ahead = doctorEntries.filter(
+              e => e.position < entry.position && ['QUEUED', 'WAITING'].includes(e.status)
+            ).length;
+
+            if (currentPatient?.startedAt) {
+              const elapsedMs = Date.now() - new Date(currentPatient.startedAt).getTime();
+              const elapsedMin = Math.floor(elapsedMs / 60000);
+              const remainingForCurrent = Math.max(0, consultationDuration - elapsedMin);
+              estimatedWaitMin = remainingForCurrent + (ahead * consultationDuration);
+            } else {
+              estimatedWaitMin = ahead * consultationDuration;
+            }
+          }
+        }
+
+        return {
+          token: entry.position,
+          patientName: entry.patient.fullName,
+          status: entry.status,
+          priority: entry.priority,
+          estimatedWaitMin,
+          checkedInAt: entry.checkedInAt,
+        };
+      });
+
+      return {
+        doctorId: doctor.id,
+        doctorName: doctor.fullName,
+        consultationDuration,
+        isCheckedIn,
+        currentPatient: currentPatient ? {
+          token: currentPatient.position,
+          patientName: currentPatient.patient.fullName,
+          startedAt: currentPatient.startedAt,
+        } : null,
+        waitingCount: patients.filter(p => p.status === 'QUEUED' || p.status === 'WAITING').length,
+        patients: patients,
+      };
+    });
+
+    // Include doctors with patients (regardless of check-in status)
+    const activeQueues = doctorQueues.filter(dq => dq.patients.length > 0);
+
+    // Calculate total incomplete patients (not completed/cancelled)
+    const totalInQueue = queueEntries.length;
+
+    return {
+      clinicName: clinic.name,
+      timezone,
+      generatedAt: new Date().toISOString(),
+      doctors: activeQueues,
+      totalWaiting: queueEntries.filter(e => e.status === 'QUEUED' || e.status === 'WAITING').length,
+      totalWithDoctor: queueEntries.filter(e => e.status === 'WITH_DOCTOR').length,
+      totalInQueue, // Total patients in queue (not completed)
+    };
+  }
+
+  // Get doctor check-in status for today
+  async getDoctorCheckInStatus(clinicId: string, doctorId: string) {
+    const clinic = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { timezone: true },
+    });
+    const timezone = clinic?.timezone || 'UTC';
+
+    // Get today's date in clinic timezone
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone });
+    const todayDate = new Date(todayStr + 'T00:00:00.000Z');
+
+    const checkIn = await this.prisma.doctorDailyCheckIn.findUnique({
+      where: {
+        doctorId_checkInDate: {
+          doctorId,
+          checkInDate: todayDate,
+        },
+      },
+    });
+
+    if (!checkIn) {
+      return {
+        isCheckedIn: false,
+        checkInTime: null,
+        checkOutTime: null,
+      };
+    }
+
+    return {
+      isCheckedIn: checkIn.checkOutTime === null,
+      checkInTime: checkIn.checkInTime.toISOString(),
+      checkOutTime: checkIn.checkOutTime?.toISOString() || null,
+    };
+  }
+
+  // Check in doctor for today
+  async doctorCheckIn(clinicId: string, doctorId: string) {
+    // Verify doctor exists and belongs to clinic
+    const doctor = await this.prisma.doctor.findFirst({
+      where: { id: doctorId, clinicId, isActive: true },
+    });
+
+    if (!doctor) {
+      throw new NotFoundException('Doctor not found');
+    }
+
+    const clinic = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { timezone: true },
+    });
+    const timezone = clinic?.timezone || 'UTC';
+
+    // Get today's date in clinic timezone
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone });
+    const todayDate = new Date(todayStr + 'T00:00:00.000Z');
+
+    // Check if already checked in today
+    const existing = await this.prisma.doctorDailyCheckIn.findUnique({
+      where: {
+        doctorId_checkInDate: {
+          doctorId,
+          checkInDate: todayDate,
+        },
+      },
+    });
+
+    if (existing && existing.checkOutTime === null) {
+      throw new BadRequestException('Doctor is already checked in');
+    }
+
+    // Create or update check-in record
+    const checkIn = await this.prisma.doctorDailyCheckIn.upsert({
+      where: {
+        doctorId_checkInDate: {
+          doctorId,
+          checkInDate: todayDate,
+        },
+      },
+      create: {
+        clinicId,
+        doctorId,
+        checkInDate: todayDate,
+        checkInTime: now,
+      },
+      update: {
+        checkInTime: now,
+        checkOutTime: null,
+      },
+    });
+
+    return {
+      isCheckedIn: true,
+      checkInTime: checkIn.checkInTime.toISOString(),
+      checkOutTime: null,
+    };
+  }
+
+  // Check out doctor for today
+  async doctorCheckOut(clinicId: string, doctorId: string) {
+    // Verify doctor exists and belongs to clinic
+    const doctor = await this.prisma.doctor.findFirst({
+      where: { id: doctorId, clinicId, isActive: true },
+    });
+
+    if (!doctor) {
+      throw new NotFoundException('Doctor not found');
+    }
+
+    const clinic = await this.prisma.clinic.findUnique({
+      where: { id: clinicId },
+      select: { timezone: true },
+    });
+    const timezone = clinic?.timezone || 'UTC';
+
+    // Get today's date in clinic timezone
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone });
+    const todayDate = new Date(todayStr + 'T00:00:00.000Z');
+
+    // Check if checked in today
+    const existing = await this.prisma.doctorDailyCheckIn.findUnique({
+      where: {
+        doctorId_checkInDate: {
+          doctorId,
+          checkInDate: todayDate,
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new BadRequestException('Doctor is not checked in today');
+    }
+
+    if (existing.checkOutTime !== null) {
+      throw new BadRequestException('Doctor is already checked out');
+    }
+
+    // Check if doctor has any patients with status WITH_DOCTOR
+    const activePatient = await this.prisma.queueEntry.findFirst({
+      where: {
+        clinicId,
+        doctorId,
+        queueDate: todayDate,
+        status: 'WITH_DOCTOR',
+      },
+    });
+
+    if (activePatient) {
+      throw new BadRequestException('Cannot check out while a patient is being consulted');
+    }
+
+    // Update check-out time
+    const checkIn = await this.prisma.doctorDailyCheckIn.update({
+      where: {
+        doctorId_checkInDate: {
+          doctorId,
+          checkInDate: todayDate,
+        },
+      },
+      data: {
+        checkOutTime: now,
+      },
+    });
+
+    return {
+      isCheckedIn: false,
+      checkInTime: checkIn.checkInTime.toISOString(),
+      checkOutTime: checkIn.checkOutTime?.toISOString() || null,
     };
   }
 }

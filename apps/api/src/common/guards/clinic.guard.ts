@@ -72,7 +72,7 @@ export class ClinicGuard implements CanActivate {
         isActive: true,
         clinic: { isActive: true },
       },
-      select: { role: true, clinic: { select: { id: true, name: true } } },
+      select: { id: true, role: true, clinic: { select: { id: true, name: true } } },
     });
 
     if (!membership) {
@@ -94,6 +94,22 @@ export class ClinicGuard implements CanActivate {
     // Attach clinic context to request
     request.clinicId = clinicId;
     request.clinicRole = membership.role;
+    request.clinicUserId = membership.id;
+
+    // For CLINIC_DOCTOR role, find their doctor record
+    let doctorId: string | null = null;
+    if (membership.role === 'CLINIC_DOCTOR') {
+      const doctor = await this.prisma.doctor.findFirst({
+        where: {
+          clinicId: clinicId,
+          userId: user.id,
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      doctorId = doctor?.id || null;
+    }
+    request.doctorId = doctorId;
 
     // Check role requirements if specified
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(CLINIC_ROLES_KEY, [

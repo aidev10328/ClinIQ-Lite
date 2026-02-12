@@ -80,6 +80,36 @@ export class QueueController {
   ) {
     return this.queueService.issueToken(clinicId, id, body.ttlMinutes);
   }
+
+  // GET /v1/queue/doctor/:doctorId/checkin - Get doctor check-in status
+  @Get('doctor/:doctorId/checkin')
+  @ClinicRoles('CLINIC_MANAGER', 'CLINIC_STAFF', 'CLINIC_DOCTOR')
+  async getDoctorCheckInStatus(
+    @ClinicId() clinicId: string,
+    @Param('doctorId') doctorId: string,
+  ) {
+    return this.queueService.getDoctorCheckInStatus(clinicId, doctorId);
+  }
+
+  // POST /v1/queue/doctor/:doctorId/checkin - Check in doctor
+  @Post('doctor/:doctorId/checkin')
+  @ClinicRoles('CLINIC_MANAGER', 'CLINIC_STAFF', 'CLINIC_DOCTOR')
+  async doctorCheckIn(
+    @ClinicId() clinicId: string,
+    @Param('doctorId') doctorId: string,
+  ) {
+    return this.queueService.doctorCheckIn(clinicId, doctorId);
+  }
+
+  // POST /v1/queue/doctor/:doctorId/checkout - Check out doctor
+  @Post('doctor/:doctorId/checkout')
+  @ClinicRoles('CLINIC_MANAGER', 'CLINIC_STAFF', 'CLINIC_DOCTOR')
+  async doctorCheckOut(
+    @ClinicId() clinicId: string,
+    @Param('doctorId') doctorId: string,
+  ) {
+    return this.queueService.doctorCheckOut(clinicId, doctorId);
+  }
 }
 
 // Public endpoint for patients to check queue status
@@ -91,5 +121,17 @@ export class PublicQueueController {
   @Get(':token')
   async getQueueByToken(@Param('token') token: string) {
     return this.queueService.getQueueByToken(token);
+  }
+}
+
+// Public endpoint for TV display in waiting area
+@Controller('tv')
+export class TvDisplayController {
+  constructor(private queueService: QueueService) {}
+
+  // GET /tv/:clinicId - Get TV display data for waiting area
+  @Get(':clinicId')
+  async getTvDisplay(@Param('clinicId') clinicId: string) {
+    return this.queueService.getTvDisplayData(clinicId);
   }
 }
