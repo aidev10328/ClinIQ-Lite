@@ -1,9 +1,7 @@
 name: Build & Deploy to Azure
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Manual trigger only — deploy when ready
 
 permissions:
   id-token: write # Required for OIDC
