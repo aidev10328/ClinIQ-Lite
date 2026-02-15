@@ -572,9 +572,10 @@ export class DoctorsService {
       if (!regenResult.skipped) {
         return {
           schedule,
-          slotsRegenerated: {
-            deleted: regenResult.deletedAvailable,
-            created: regenResult.created,
+          slotsGenerated: {
+            slotsCreated: regenResult.created,
+            startDate: new Date().toISOString().split('T')[0],
+            endDate: new Date().toISOString().split('T')[0],
           },
         };
       }

@@ -1,0 +1,56 @@
+# Build context must be the monorepo root:
+#   docker build -f apps/api/Dockerfile .
+
+# Stage 1: Build
+FROM node:20-slim AS builder
+WORKDIR /app
+
+# Install OpenSSL for Prisma
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+# Copy monorepo root package files
+COPY package.json package-lock.json ./
+
+# Copy API package.json for workspace install
+COPY apps/api/package.json ./apps/api/
+
+# Install all dependencies
+RUN npm ci --workspace=apps/api --include-workspace-root
+
+# Copy prisma schema and generate client
+COPY apps/api/prisma ./apps/api/prisma/
+RUN cd apps/api && npx prisma generate
+
+# Copy API source and build
+COPY apps/api/tsconfig.json ./apps/api/
+COPY apps/api/src ./apps/api/src/
+RUN cd apps/api && npm run build
+
+# Stage 2: Production
+FROM node:20-slim AS runner
+WORKDIR /app
+
+# Install OpenSSL for Prisma
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+
+# Copy monorepo root package files
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/
+
+# Install production deps only
+RUN npm ci --workspace=apps/api --include-workspace-root --omit=dev
+
+# Generate Prisma client
+COPY apps/api/prisma ./apps/api/prisma/
+RUN cd apps/api && npx prisma generate
+
+# Copy built output
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+
+WORKDIR /app/apps/api
+
+EXPOSE 4000
+
+CMD ["node", "dist/src/main.js"]

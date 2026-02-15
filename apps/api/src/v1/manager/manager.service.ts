@@ -451,7 +451,7 @@ export class ManagerService {
 
     // Auto-generate slots for the newly licensed doctor (if schedule is configured)
     try {
-      await this.persistentSlotsService.initializeDoctorSlots(clinicId, doctorId);
+      await this.persistentSlotsService.regenerateSlotsAfterScheduleChange(clinicId, doctorId);
     } catch (error) {
       // Log but don't fail - slots can be generated later
       console.warn(`Failed to auto-generate slots for doctor ${doctorId}:`, error);
