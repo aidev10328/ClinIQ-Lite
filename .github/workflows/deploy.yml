@@ -61,17 +61,22 @@ jobs:
           docker push $IMAGE_LATEST
 
       - name: Deploy API to Container App
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
         run: |
           az containerapp update \
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ secrets.ACR_NAME }}.azurecr.io/cliniq-lite-api:${{ github.sha }} \
             --set-env-vars \
-              "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
-              "DIRECT_URL=${{ secrets.DIRECT_URL }}" \
-              "JWT_SECRET=${{ secrets.JWT_SECRET }}" \
+              "DATABASE_URL=${DATABASE_URL}" \
+              "DIRECT_URL=${DIRECT_URL}" \
+              "JWT_SECRET=${JWT_SECRET}" \
               "API_PORT=4000" \
-              "CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}" \
+              "CORS_ORIGIN=${CORS_ORIGIN}" \
               "NODE_ENV=production"
 
   # ── Build & Deploy Web ─────────────────────────────────────
