@@ -65,7 +65,14 @@ jobs:
           az containerapp update \
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ secrets.ACR_NAME }}.azurecr.io/cliniq-lite-api:${{ github.sha }}
+            --image ${{ secrets.ACR_NAME }}.azurecr.io/cliniq-lite-api:${{ github.sha }} \
+            --set-env-vars \
+              "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              "DIRECT_URL=${{ secrets.DIRECT_URL }}" \
+              "JWT_SECRET=${{ secrets.JWT_SECRET }}" \
+              "API_PORT=4000" \
+              "CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}" \
+              "NODE_ENV=production"
 
   # ── Build & Deploy Web ─────────────────────────────────────
   deploy-web:
