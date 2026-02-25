@@ -79,6 +79,7 @@ export interface ScheduleUpdateResult {
   schedule: DoctorScheduleResponse;
   slotsGenerated?: SlotGenerationResult;
   isFirstTimeConfiguration?: boolean;
+  slotsGenerationError?: string;
 }
 
 export interface ConflictingAppointment {
@@ -546,23 +547,45 @@ export class DoctorsService {
       const isFullyConfigured = await this.persistentSlotsService.isScheduleFullyConfigured(doctorId);
 
       if (isFullyConfigured) {
-        // Mark schedule as configured, but DON'T auto-generate slots
-        // Admin must manually generate slots via the admin UI
-        await this.prisma.doctor.update({
-          where: { id: doctorId },
-          data: { scheduleConfiguredAt: new Date() },
-        });
+        // Mark schedule as configured and AUTO-GENERATE slots for next 30 days
+        // (generating for entire year is too slow with remote DB)
+        const timezone = await this.getClinicTimezone(clinicId);
+        const today = this.timezoneService.formatDateInTimezone(new Date(), timezone);
+        const thirtyDaysLater = new Date();
+        thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+        const endDate = this.timezoneService.formatDateInTimezone(thirtyDaysLater, timezone);
 
-        return {
-          schedule,
-          isFirstTimeConfiguration: true,
-          // No slotsGenerated - admin must generate manually
-        };
+        try {
+          const slotsResult = await this.persistentSlotsService.generateSlotsForRange(
+            clinicId,
+            doctorId,
+            today,
+            endDate,
+          );
+
+          return {
+            schedule,
+            isFirstTimeConfiguration: true,
+            slotsGenerated: slotsResult,
+          };
+        } catch (error) {
+          // If slot generation fails, still mark as configured but report the issue
+          await this.prisma.doctor.update({
+            where: { id: doctorId },
+            data: { scheduleConfiguredAt: new Date() },
+          });
+
+          return {
+            schedule,
+            isFirstTimeConfiguration: true,
+            slotsGenerationError: error.message,
+          };
+        }
       }
     } else {
       // Schedule was already configured - regenerate slots within stored range
-      // This only regenerates from today to the previously stored end date
-      // If no slots were ever generated, this is a no-op
+      // This regenerates from today to the previously stored end date
+      // If no slots were ever generated, it will auto-generate them
       const regenResult = await this.persistentSlotsService.regenerateSlotsAfterScheduleChange(
         clinicId,
         doctorId,
@@ -579,7 +602,7 @@ export class DoctorsService {
           },
         };
       }
-      // If skipped (no slots generated yet), just return the schedule
+      // If skipped, just return the schedule
     }
 
     return { schedule };

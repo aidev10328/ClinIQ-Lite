@@ -643,29 +643,49 @@ export class PersistentSlotsService {
 
     const timezone = clinic?.timezone || 'UTC';
 
+    // For @db.Date field queries, use UTC midnight
+    const today = this.timezoneService.getClinicDateUtcMidnight(timezone);
+    const todayStr = this.timezoneService.formatDateInTimezone(new Date(), timezone);
+    // Generate for 30 days only (to avoid slow generation with remote DB)
+    const thirtyDaysLater = new Date();
+    thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+    const endDateStr = this.timezoneService.formatDateInTimezone(thirtyDaysLater, timezone);
+
     // Check if slots were ever generated for this doctor
+    // If not, auto-generate from today for 30 days
     if (!doctor?.slotsGeneratedFrom || !doctor?.slotsGeneratedTo) {
+      // Check if schedule is fully configured before generating
+      const isConfigured = await this.isScheduleFullyConfigured(doctorId);
+      if (!isConfigured) {
+        return {
+          deletedAvailable: 0,
+          created: 0,
+          cancelledAppointments: 0,
+          skipped: true,
+          skipReason: 'Schedule is not fully configured. Please set duration, shift templates, and weekly schedule first.',
+        };
+      }
+
+      // Auto-generate slots from today for 30 days
+      const result = await this.generateSlotsForRange(clinicId, doctorId, todayStr, endDateStr);
       return {
         deletedAvailable: 0,
-        created: 0,
+        created: result.slotsCreated,
         cancelledAppointments: 0,
-        skipped: true,
-        skipReason: 'No slots have been generated for this doctor yet. Use admin slot generation first.',
+        skipped: false,
       };
     }
 
-    // For @db.Date field queries, use UTC midnight
-    const today = this.timezoneService.getClinicDateUtcMidnight(timezone);
     const storedEndDate = doctor.slotsGeneratedTo;
 
-    // If the stored end date is in the past, nothing to regenerate
+    // If the stored end date is in the past, regenerate from today for 30 days
     if (storedEndDate < today) {
+      const result = await this.generateSlotsForRange(clinicId, doctorId, todayStr, endDateStr);
       return {
         deletedAvailable: 0,
-        created: 0,
+        created: result.slotsCreated,
         cancelledAppointments: 0,
-        skipped: true,
-        skipReason: 'Stored slot generation range is in the past. Generate new slots first.',
+        skipped: false,
       };
     }
 
