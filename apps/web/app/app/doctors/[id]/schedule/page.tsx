@@ -13,6 +13,7 @@ import {
   ShiftType,
   TimeOffType,
   TimeOffEntry,
+  getClinicTime,
 } from '../../../../../lib/api';
 
 // Time options for dropdowns
@@ -82,6 +83,17 @@ export default function DoctorSchedulePage() {
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(new Date());
+
+  // Fetch clinic time (for timezone-aware "today" highlighting)
+  const { data: clinicTime } = useQuery({
+    queryKey: ['clinicTime'],
+    queryFn: async () => {
+      const { data, error } = await getClinicTime();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    staleTime: 60 * 1000, // 1 minute
+  });
 
   // Fetch schedule data
   const { data: scheduleData, isLoading, error } = useQuery({
@@ -487,7 +499,9 @@ export default function DoctorSchedulePage() {
               <div className="grid grid-cols-7 gap-1">
                 {calendarDays.map((date, index) => {
                   const isOff = isTimeOffDay(date);
-                  const isToday = date?.toDateString() === new Date().toDateString();
+                  // Use clinic timezone for "today" highlight, not browser local time
+                  const dateStr = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '';
+                  const isToday = dateStr === clinicTime?.currentDate;
 
                   return (
                     <div

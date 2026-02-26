@@ -357,6 +357,82 @@ async function main() {
   console.log(`   - Patient: ${demoPatient.fullName} (${demoPatient.phone})`);
 
   // ============================================
+  // 11. Create Initial Changelog Entries
+  // ============================================
+  console.log('\n11. Creating initial changelog entries...');
+
+  // Bug Fix 1: Duplicate Token Numbers
+  await prisma.changeLog.upsert({
+    where: { number: 1 },
+    update: {},
+    create: {
+      type: 'BUG_FIX',
+      title: 'Fix duplicate token numbers in Daily Queue',
+      description: 'In some cases, the same token number was being allocated to two patients - one completed and one in the waitlist. This occurred when multiple patients were checking in simultaneously.',
+      rootCause: 'Position queries for determining the next token number were running outside database transactions, allowing race conditions when multiple patients check in at the same time.',
+      resolution: 'Moved all position queries inside database transactions using tx.queueEntry.findFirst() instead of this.prisma.queueEntry.findFirst(). Fixed in three locations:\n1. appointments.service.ts - markNoShow() function\n2. appointments.service.ts - checkinAppointment() function\n3. queue.service.ts - createWalkin() function',
+      changedFiles: [
+        'apps/api/src/v1/appointments/appointments.service.ts',
+        'apps/api/src/v1/queue/queue.service.ts',
+      ],
+      impact: 'No impact on existing functionality. Token numbers will now be unique within each doctor\'s queue for the day.',
+      reportedBy: 'User',
+      resolvedBy: 'Claude Code',
+      resolvedAt: new Date(),
+    },
+  });
+  console.log('   - Bug Fix #1: Duplicate token numbers');
+
+  // Bug Fix 2: Doctor Availability Status
+  await prisma.changeLog.upsert({
+    where: { number: 2 },
+    update: {},
+    create: {
+      type: 'BUG_FIX',
+      title: 'Fix incorrect "Doctor is Available" status on patient link',
+      description: 'The patient-facing queue status page was showing "Doctor is Available" even when the doctor had not checked in for the day.',
+      rootCause: 'The getQueueByToken() function in queue.service.ts only checked if the doctor was currently busy with a patient (isDoctorBusy), but did not verify whether the doctor had actually checked in for the day.',
+      resolution: 'Added a query to DoctorDailyCheckIn table to verify doctor check-in status. Added isDoctorCheckedIn boolean to the response. Updated the patient page UI to show three states:\n- "Not Available" (gray) - Doctor hasn\'t checked in\n- "In Session" (amber) - Doctor is with a patient\n- "Available" (green) - Doctor is checked in and ready',
+      changedFiles: [
+        'apps/api/src/v1/queue/queue.service.ts',
+        'apps/web/lib/api.ts',
+        'apps/web/app/p/[token]/page.tsx',
+      ],
+      impact: 'Improved patient experience - they now see accurate doctor availability status.',
+      reportedBy: 'User',
+      resolvedBy: 'Claude Code',
+      resolvedAt: new Date(),
+    },
+  });
+  console.log('   - Bug Fix #2: Doctor availability status');
+
+  // Feature: Changelog System
+  await prisma.changeLog.upsert({
+    where: { number: 3 },
+    update: {},
+    create: {
+      type: 'FEATURE',
+      title: 'Add Change Log tracking system for admin',
+      description: 'Added a comprehensive changelog tracking system that allows administrators to document and view all bug fixes, features, and enhancements made to the system.',
+      resolution: 'Created new ChangeLog table in database with fields for number, timestamp, type, description, root cause, resolution, changed files, and impact. Built admin API endpoints for CRUD operations and statistics. Created admin UI page at /admin/changelog with filtering, search, and detail views.',
+      changedFiles: [
+        'apps/api/prisma/schema.prisma',
+        'apps/api/src/admin/admin-changelog.service.ts',
+        'apps/api/src/admin/admin-changelog.controller.ts',
+        'apps/api/src/admin/admin.module.ts',
+        'apps/web/lib/api.ts',
+        'apps/web/app/admin/changelog/page.tsx',
+        'apps/api/prisma/seed.ts',
+      ],
+      impact: 'New feature - provides visibility into all changes made to the system for audit and tracking purposes.',
+      reportedBy: 'User',
+      resolvedBy: 'Claude Code',
+      resolvedAt: new Date(),
+    },
+  });
+  console.log('   - Feature #3: Changelog tracking system');
+
+  // ============================================
   // Summary
   // ============================================
   console.log('\n========================================');
@@ -372,6 +448,7 @@ async function main() {
   console.log('  Weekly Schedule: Mon-Fri (Morning + Evening)');
   console.log('  Time Off: Feb 4, 10, 11-12, 24-25');
   console.log(`  Patient: ${demoPatient.fullName}`);
+  console.log('  Changelog: 3 initial entries');
   console.log('========================================\n');
 }
 

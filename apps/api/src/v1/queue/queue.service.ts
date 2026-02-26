@@ -176,75 +176,78 @@ export class QueueService {
     const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD format
     const today = new Date(todayStr + 'T00:00:00.000Z'); // UTC midnight
 
-    // Get next position in queue for this doctor today
-    const lastEntry = await this.prisma.queueEntry.findFirst({
-      where: {
-        clinicId,
-        doctorId: data.doctorId,
-        queueDate: today,
-      },
-      orderBy: { position: 'desc' },
-    });
-
-    const position = (lastEntry?.position || 0) + 1;
-
-    // Determine effective position based on priority
-    // EMERGENCY goes to position 1, URGENT goes after emergency, NORMAL at end
-    let effectivePosition = position;
-    if (data.priority === 'EMERGENCY') {
-      effectivePosition = 1;
-      // Shift all others down
-      await this.prisma.queueEntry.updateMany({
+    // Use transaction to prevent race conditions with position assignment
+    return this.prisma.$transaction(async (tx) => {
+      // Get next position in queue for this doctor today (inside transaction)
+      const lastEntry = await tx.queueEntry.findFirst({
         where: {
           clinicId,
           doctorId: data.doctorId,
           queueDate: today,
-          status: { in: ['QUEUED', 'WAITING'] },
-        },
-        data: { position: { increment: 1 } },
-      });
-    } else if (data.priority === 'URGENT') {
-      // Find position after emergencies
-      const lastEmergency = await this.prisma.queueEntry.findFirst({
-        where: {
-          clinicId,
-          doctorId: data.doctorId,
-          queueDate: today,
-          priority: 'EMERGENCY',
         },
         orderBy: { position: 'desc' },
       });
-      effectivePosition = (lastEmergency?.position || 0) + 1;
-      // Shift all non-emergency entries at or after this position
-      await this.prisma.queueEntry.updateMany({
-        where: {
+
+      const position = (lastEntry?.position || 0) + 1;
+
+      // Determine effective position based on priority
+      // EMERGENCY goes to position 1, URGENT goes after emergency, NORMAL at end
+      let effectivePosition = position;
+      if (data.priority === 'EMERGENCY') {
+        effectivePosition = 1;
+        // Shift all others down
+        await tx.queueEntry.updateMany({
+          where: {
+            clinicId,
+            doctorId: data.doctorId,
+            queueDate: today,
+            status: { in: ['QUEUED', 'WAITING'] },
+          },
+          data: { position: { increment: 1 } },
+        });
+      } else if (data.priority === 'URGENT') {
+        // Find position after emergencies
+        const lastEmergency = await tx.queueEntry.findFirst({
+          where: {
+            clinicId,
+            doctorId: data.doctorId,
+            queueDate: today,
+            priority: 'EMERGENCY',
+          },
+          orderBy: { position: 'desc' },
+        });
+        effectivePosition = (lastEmergency?.position || 0) + 1;
+        // Shift all non-emergency entries at or after this position
+        await tx.queueEntry.updateMany({
+          where: {
+            clinicId,
+            doctorId: data.doctorId,
+            queueDate: today,
+            priority: { not: 'EMERGENCY' },
+            position: { gte: effectivePosition },
+            status: { in: ['QUEUED', 'WAITING'] },
+          },
+          data: { position: { increment: 1 } },
+        });
+      }
+
+      return tx.queueEntry.create({
+        data: {
           clinicId,
           doctorId: data.doctorId,
+          patientId: patient.id,
           queueDate: today,
-          priority: { not: 'EMERGENCY' },
-          position: { gte: effectivePosition },
-          status: { in: ['QUEUED', 'WAITING'] },
+          position: effectivePosition,
+          priority: data.priority || 'NORMAL',
+          status: 'QUEUED',
+          source: 'WALKIN',
+          reason: data.reason,
         },
-        data: { position: { increment: 1 } },
+        include: {
+          patient: { select: { id: true, fullName: true, phone: true } },
+          doctor: { select: { id: true, fullName: true } },
+        },
       });
-    }
-
-    return this.prisma.queueEntry.create({
-      data: {
-        clinicId,
-        doctorId: data.doctorId,
-        patientId: patient.id,
-        queueDate: today,
-        position: effectivePosition,
-        priority: data.priority || 'NORMAL',
-        status: 'QUEUED',
-        source: 'WALKIN',
-        reason: data.reason,
-      },
-      include: {
-        patient: { select: { id: true, fullName: true, phone: true } },
-        doctor: { select: { id: true, fullName: true } },
-      },
     });
   }
 
@@ -399,6 +402,19 @@ export class QueueService {
       select: { startedAt: true },
     });
 
+    // Check if doctor has checked in for today (queueDate is already UTC midnight)
+    const doctorCheckIn = await this.prisma.doctorDailyCheckIn.findUnique({
+      where: {
+        doctorId_checkInDate: {
+          doctorId: entry.doctorId,
+          checkInDate: entry.queueDate,
+        },
+      },
+      select: { checkOutTime: true },
+    });
+
+    // Doctor is checked in if record exists AND checkOutTime is null (hasn't checked out)
+    const isDoctorCheckedIn = !!doctorCheckIn && doctorCheckIn.checkOutTime === null;
     const isDoctorBusy = !!patientWithDoctor;
     const consultationDurationMin = entry.doctor.appointmentDurationMin || 15;
 
@@ -429,6 +445,7 @@ export class QueueService {
       source: entry.source, // WALKIN or APPOINTMENT
       peopleAhead: ahead,
       checkedInAt: entry.checkedInAt,
+      isDoctorCheckedIn,
       isDoctorBusy,
       consultationDurationMin,
       estimatedWaitMinutes,

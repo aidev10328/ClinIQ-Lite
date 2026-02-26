@@ -190,16 +190,20 @@ export default function PatientStatusPage() {
             <p className="text-xs text-gray-500 mb-1">Doctor Availability</p>
             <div className="flex items-center justify-center gap-2">
               <span className={`w-3 h-3 rounded-full ${
+                !status.isDoctorCheckedIn ? 'bg-gray-400' :
                 status.isDoctorBusy ? 'bg-amber-400' : 'bg-accent-500'
-              } ${!status.isDoctorBusy && isActive ? 'animate-pulse' : ''}`}></span>
+              } ${status.isDoctorCheckedIn && !status.isDoctorBusy && isActive ? 'animate-pulse' : ''}`}></span>
               <p className={`text-lg font-bold ${
+                !status.isDoctorCheckedIn ? 'text-gray-500' :
                 status.isDoctorBusy ? 'text-amber-600' : 'text-accent-600'
               }`}>
-                {status.isDoctorBusy ? 'In Session' : 'Available'}
+                {!status.isDoctorCheckedIn ? 'Not Available' :
+                 status.isDoctorBusy ? 'In Session' : 'Available'}
               </p>
             </div>
             <p className="text-xs text-gray-400">
-              {status.isDoctorBusy ? 'With a patient' : 'Ready to see you'}
+              {!status.isDoctorCheckedIn ? 'Doctor has not checked in yet' :
+               status.isDoctorBusy ? 'With a patient' : 'Ready to see you'}
             </p>
           </div>
         </div>

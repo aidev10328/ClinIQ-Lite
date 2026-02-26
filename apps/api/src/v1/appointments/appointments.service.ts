@@ -322,20 +322,20 @@ export class AppointmentsService {
     const todayStr = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD format
     const today = new Date(todayStr + 'T00:00:00.000Z'); // UTC midnight
 
-    // Get next position in queue for this doctor today
-    const lastEntry = await this.prisma.queueEntry.findFirst({
-      where: {
-        clinicId,
-        doctorId: appointment.doctorId,
-        queueDate: today,
-      },
-      orderBy: { position: 'desc' },
-    });
-
-    const position = (lastEntry?.position || 0) + 1;
-
     // Create queue entry with COMPLETED status and NO_SHOW outcome in transaction
     return this.prisma.$transaction(async (tx) => {
+      // Get next position in queue for this doctor today (inside transaction to prevent race conditions)
+      const lastEntry = await tx.queueEntry.findFirst({
+        where: {
+          clinicId,
+          doctorId: appointment.doctorId,
+          queueDate: today,
+        },
+        orderBy: { position: 'desc' },
+      });
+
+      const position = (lastEntry?.position || 0) + 1;
+
       // Update appointment status
       await tx.appointment.update({
         where: { id: appointmentId },
@@ -392,19 +392,20 @@ export class AppointmentsService {
     const today = new Date(todayStr + 'T00:00:00.000Z'); // UTC midnight
 
     // Get next position in queue for this doctor today
-    const lastEntry = await this.prisma.queueEntry.findFirst({
-      where: {
-        clinicId,
-        doctorId: appointment.doctorId,
-        queueDate: today,
-      },
-      orderBy: { position: 'desc' },
-    });
-
-    const position = (lastEntry?.position || 0) + 1;
-
     // Create queue entry and generate token in transaction
     const result = await this.prisma.$transaction(async (tx) => {
+      // Get next position in queue for this doctor today (inside transaction to prevent race conditions)
+      const lastEntry = await tx.queueEntry.findFirst({
+        where: {
+          clinicId,
+          doctorId: appointment.doctorId,
+          queueDate: today,
+        },
+        orderBy: { position: 'desc' },
+      });
+
+      const position = (lastEntry?.position || 0) + 1;
+
       // Update appointment status to CHECKED_IN (will become COMPLETED or NO_SHOW when queue entry is completed)
       await tx.appointment.update({
         where: { id: appointmentId },

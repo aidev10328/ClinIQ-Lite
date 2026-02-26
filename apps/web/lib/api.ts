@@ -279,6 +279,7 @@ export type PublicQueueStatus = {
   source: QueueSource; // WALKIN or APPOINTMENT
   peopleAhead: number;
   checkedInAt: string;
+  isDoctorCheckedIn: boolean;
   isDoctorBusy: boolean;
   consultationDurationMin: number;
   estimatedWaitMinutes: number | null;
@@ -1726,6 +1727,110 @@ export async function adminGenerateDoctorSlots(
 // Clear future slots for a doctor (Admin only)
 export async function adminClearDoctorSlots(clinicId: string, doctorId: string) {
   return apiFetch<{ deletedCount: number }>(`/admin/clinics/${clinicId}/doctors/${doctorId}/slots`, {
+    method: 'DELETE',
+  });
+}
+
+// ============================================
+// Admin API - Changelog (Bug Fixes & Features)
+// ============================================
+
+export type ChangeType = 'BUG_FIX' | 'FEATURE' | 'ENHANCEMENT' | 'SECURITY';
+
+export type ChangeLogItem = {
+  id: string;
+  number: number;
+  type: ChangeType;
+  title: string;
+  description: string;
+  rootCause: string | null;
+  resolution: string;
+  changedFiles: string[];
+  impact: string | null;
+  version: string | null;
+  reportedBy: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChangeLogListResponse = {
+  items: ChangeLogItem[];
+  total: number;
+};
+
+export type ChangeLogStats = {
+  total: number;
+  byType: Record<string, number>;
+};
+
+export type CreateChangeLogData = {
+  type: ChangeType;
+  title: string;
+  description: string;
+  rootCause?: string;
+  resolution: string;
+  changedFiles: string[];
+  impact?: string;
+  version?: string;
+  reportedBy?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+};
+
+export type UpdateChangeLogData = Partial<CreateChangeLogData>;
+
+// List all changelog entries (Admin only)
+export async function adminListChangeLogs(filters?: {
+  type?: ChangeType;
+  search?: string;
+  from?: string;
+  to?: string;
+}) {
+  const params = new URLSearchParams();
+  if (filters?.type) params.append('type', filters.type);
+  if (filters?.search) params.append('search', filters.search);
+  if (filters?.from) params.append('from', filters.from);
+  if (filters?.to) params.append('to', filters.to);
+  const queryString = params.toString();
+  return apiFetch<ChangeLogListResponse>(`/admin/changelog${queryString ? `?${queryString}` : ''}`);
+}
+
+// Get changelog stats (Admin only)
+export async function adminGetChangeLogStats() {
+  return apiFetch<ChangeLogStats>('/admin/changelog/stats');
+}
+
+// Get single changelog by ID (Admin only)
+export async function adminGetChangeLog(id: string) {
+  return apiFetch<ChangeLogItem>(`/admin/changelog/${id}`);
+}
+
+// Get changelog by number (Admin only)
+export async function adminGetChangeLogByNumber(number: number) {
+  return apiFetch<ChangeLogItem>(`/admin/changelog/number/${number}`);
+}
+
+// Create changelog entry (Admin only)
+export async function adminCreateChangeLog(data: CreateChangeLogData) {
+  return apiFetch<ChangeLogItem>('/admin/changelog', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// Update changelog entry (Admin only)
+export async function adminUpdateChangeLog(id: string, data: UpdateChangeLogData) {
+  return apiFetch<ChangeLogItem>(`/admin/changelog/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+// Delete changelog entry (Admin only)
+export async function adminDeleteChangeLog(id: string) {
+  return apiFetch<ChangeLogItem>(`/admin/changelog/${id}`, {
     method: 'DELETE',
   });
 }

@@ -26,6 +26,7 @@ import {
   createTimeOff,
   deleteTimeOff,
   getSpecializations,
+  getClinicTime,
   Specialization,
   ManagerDoctor,
   ManagerStaff,
@@ -93,6 +94,17 @@ export default function SettingsPage() {
     },
     enabled: canFetchManagerData,
     staleTime: 30 * 1000, // 30 seconds
+  });
+
+  // Fetch clinic time (for timezone-aware "today" highlighting in calendar)
+  const { data: clinicTime } = useQuery({
+    queryKey: ['clinicTime'],
+    queryFn: async () => {
+      const { data, error } = await getClinicTime();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    staleTime: 60 * 1000, // 1 minute
   });
 
   const { data: doctors, isLoading: doctorsLoading, error: doctorsError, refetch: refetchDoctors } = useQuery({
@@ -185,6 +197,7 @@ export default function SettingsPage() {
         doctorId={selectedDoctorId}
         doctor={selectedDoctor}
         licenseInfo={licenseInfo}
+        clinicTime={clinicTime}
         onBack={handleBackToList}
       />
     );
@@ -659,11 +672,13 @@ function EditDoctorView({
   doctorId,
   doctor,
   licenseInfo,
+  clinicTime,
   onBack,
 }: {
   doctorId: string;
   doctor?: ManagerDoctor;
   licenseInfo?: ManagerLicenseInfo | null;
+  clinicTime?: { currentDate: string; timezone: string } | null;
   onBack: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -1319,7 +1334,9 @@ function EditDoctorView({
               <div className="grid grid-cols-7 gap-0.5">
                 {calendarDays.map((date, index) => {
                   const isOff = isTimeOffDay(date);
-                  const isToday = date?.toDateString() === new Date().toDateString();
+                  // Use clinic timezone for "today" highlight, not browser local time
+                  const dateStr = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '';
+                  const isToday = dateStr === clinicTime?.currentDate;
                   return (
                     <div key={index} className={`aspect-square flex items-center justify-center text-[10px] rounded ${!date ? '' : isOff ? 'bg-red-100 text-red-700 font-medium' : isToday ? 'bg-primary-100 text-primary-700 font-medium' : 'text-gray-700'}`}>
                       {date?.getDate()}

@@ -21,7 +21,8 @@ export function useDoctors() {
       if (error) throw new Error(error.message);
       return data;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes (doctors list doesn't change often)
+    staleTime: 60 * 1000, // 1 minute - license changes should reflect quickly
+    refetchOnWindowFocus: true, // Refetch when user switches back to tab
   });
 }
 
@@ -34,7 +35,8 @@ export function useAssignedDoctors() {
       if (error) throw new Error(error.message);
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000, // 1 minute - license changes should reflect quickly
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -71,7 +73,8 @@ export function useFilteredDoctors(): FilteredDoctorsResult {
       if (error) throw new Error(error.message);
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000, // 1 minute - license changes should reflect quickly
+    refetchOnWindowFocus: true,
     enabled: isManager || (!isStaff && !isDoctor),
   });
 
@@ -83,7 +86,8 @@ export function useFilteredDoctors(): FilteredDoctorsResult {
       if (error) throw new Error(error.message);
       return data;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
     enabled: isStaff,
   });
 
@@ -96,7 +100,8 @@ export function useFilteredDoctors(): FilteredDoctorsResult {
       // Filter to only the logged-in doctor
       return data?.filter(d => d.id === doctorId) || [];
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
     enabled: isDoctor && !!doctorId,
   });
 
