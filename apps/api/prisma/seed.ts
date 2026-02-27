@@ -9,12 +9,12 @@ async function main() {
   // ============================================
   // 1. Create/Update Admin User
   // ============================================
-  const adminPassword = await bcrypt.hash('admin123', 10);
+  const adminPassword = await bcrypt.hash('Admin123!', 10);
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@local' },
+    where: { email: 'admin@cliniq.local' },
     update: {},
     create: {
-      email: 'admin@local',
+      email: 'admin@cliniq.local',
       passwordHash: adminPassword,
       firstName: 'Admin',
       lastName: 'User',
@@ -439,8 +439,8 @@ async function main() {
   console.log('Seeding completed successfully!');
   console.log('========================================');
   console.log('\nDemo Credentials:');
-  console.log('  Email: admin@local');
-  console.log('  Password: admin123');
+  console.log('  Email: admin@cliniq.local');
+  console.log('  Password: Admin123!');
   console.log('\nDemo Data:');
   console.log(`  Clinic: ${demoClinic.name}`);
   console.log(`  Doctor: ${demoDoctor.fullName}`);
