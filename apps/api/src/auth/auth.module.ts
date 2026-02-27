@@ -12,10 +12,16 @@ import { PrismaService } from '../prisma.service';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') || 'changeme',
-        signOptions: { expiresIn: '1h' },
-      }),
+      useFactory: (config: ConfigService) => {
+        const jwtSecret = config.get<string>('JWT_SECRET');
+        if (!jwtSecret) {
+          throw new Error('CRITICAL: JWT_SECRET environment variable is not set. Application cannot start.');
+        }
+        return {
+          secret: jwtSecret,
+          signOptions: { expiresIn: '30m' }, // Reduced from 1h to 30m for better security
+        };
+      },
     }),
   ],
   controllers: [AuthController],

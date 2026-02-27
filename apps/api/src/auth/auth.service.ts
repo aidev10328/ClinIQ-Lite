@@ -3,6 +3,22 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma.service';
 
+// Bcrypt rounds - 12 provides good security vs performance balance
+// Higher = more secure but slower (each +1 doubles time)
+const BCRYPT_ROUNDS = 12;
+
+// User type without sensitive data (exported for use in controllers)
+export interface SafeUser {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  role: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -10,7 +26,7 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async validateUser(email: string, password: string) {
+  async validateUser(email: string, password: string): Promise<SafeUser | null> {
     // Make email case-insensitive by converting to lowercase
     const normalizedEmail = email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
@@ -27,7 +43,7 @@ export class AuthService {
     return result;
   }
 
-  async login(user: any) {
+  async login(user: SafeUser) {
     const payload = { sub: user.id, email: user.email };
     return {
       ok: true,
@@ -37,15 +53,19 @@ export class AuthService {
   }
 
   async register(data: { email: string; password: string; firstName?: string; lastName?: string }) {
-    const existing = await this.prisma.user.findUnique({ where: { email: data.email } });
+    // Normalize email to lowercase
+    const normalizedEmail = data.email.toLowerCase().trim();
+
+    const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
       throw new ConflictException('Email already registered');
     }
 
-    const passwordHash = await bcrypt.hash(data.password, 10);
+    // Use stronger bcrypt rounds for better security
+    const passwordHash = await bcrypt.hash(data.password, BCRYPT_ROUNDS);
     const user = await this.prisma.user.create({
       data: {
-        email: data.email,
+        email: normalizedEmail,
         passwordHash,
         firstName: data.firstName,
         lastName: data.lastName,

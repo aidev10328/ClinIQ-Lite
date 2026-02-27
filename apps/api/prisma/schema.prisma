@@ -550,3 +550,87 @@ model ChangeLog {
   @@index([resolvedAt])
   @@index([number])
 }
+
+// ============================================
+// ClinIQ Lite - Audit Log (Security & Compliance)
+// ============================================
+
+enum AuditAction {
+  // Authentication
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGOUT
+  PASSWORD_CHANGE
+
+  // User Management
+  USER_CREATE
+  USER_UPDATE
+  USER_DEACTIVATE
+
+  // Doctor Management
+  DOCTOR_CREATE
+  DOCTOR_UPDATE
+  DOCTOR_DEACTIVATE
+  LICENSE_ASSIGN
+  LICENSE_REVOKE
+
+  // Patient Data Access
+  PATIENT_VIEW
+  PATIENT_CREATE
+  PATIENT_UPDATE
+  PATIENT_HISTORY_VIEW
+
+  // Appointments
+  APPOINTMENT_CREATE
+  APPOINTMENT_UPDATE
+  APPOINTMENT_CANCEL
+
+  // Schedule Changes
+  SCHEDULE_UPDATE
+  TIMEOFF_CREATE
+  TIMEOFF_DELETE
+
+  // Staff Management
+  STAFF_ADD
+  STAFF_REMOVE
+  STAFF_ASSIGNMENT_UPDATE
+
+  // Admin Actions
+  CLINIC_CREATE
+  CLINIC_UPDATE
+  SLOTS_GENERATE
+}
+
+model AuditLog {
+  id          String      @id @default(uuid())
+  action      AuditAction                           // What action was performed
+
+  // Who performed the action
+  userId      String?                               // Platform user ID (null for system actions)
+  userEmail   String?                               // Email for quick reference (denormalized)
+  clinicId    String?                               // Which clinic context
+  clinicUserId String?                              // Clinic user ID if applicable
+
+  // What was affected
+  entityType  String?                               // e.g., 'Patient', 'Appointment', 'Doctor'
+  entityId    String?                               // ID of the affected entity
+
+  // Details
+  details     Json?                                 // Additional action-specific details
+  ipAddress   String?                               // Client IP address
+  userAgent   String?                               // Client user agent
+
+  // Result
+  success     Boolean     @default(true)            // Whether action succeeded
+  errorMessage String?                              // Error message if failed
+
+  createdAt   DateTime    @default(now())
+
+  // Indexes for common queries
+  @@index([action])
+  @@index([userId])
+  @@index([clinicId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([clinicId, createdAt])
+}
