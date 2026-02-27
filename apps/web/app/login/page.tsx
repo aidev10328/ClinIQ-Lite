@@ -86,8 +86,7 @@ export default function LoginPage() {
         setError(apiError?.message || 'Invalid credentials');
         refreshCaptcha();
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
       setError('Login failed. Is the API server running?');
       refreshCaptcha();
     } finally {

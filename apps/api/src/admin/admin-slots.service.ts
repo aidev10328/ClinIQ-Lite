@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { PersistentSlotsService } from '../v1/doctors/persistent-slots.service';
 
@@ -49,6 +49,8 @@ export type BulkGenerationResult = {
 
 @Injectable()
 export class AdminSlotsService {
+  private readonly logger = new Logger(AdminSlotsService.name);
+
   constructor(
     private prisma: PrismaService,
     private persistentSlotsService: PersistentSlotsService,
@@ -275,7 +277,7 @@ export class AdminSlotsService {
         totalSlotsCreated += result.totalSlotsCreated;
       } catch (error) {
         // Log but continue with other clinics
-        console.error(`Failed to generate slots for clinic ${clinic.id}:`, error);
+        this.logger.error(`Failed to generate slots for clinic ${clinic.id}`, error instanceof Error ? error.stack : error);
       }
     }
 

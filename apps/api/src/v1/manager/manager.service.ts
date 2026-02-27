@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { CacheService, CacheKeys, CacheTTL } from '../../cache.service';
 import { CreateDoctorDto, UpdateDoctorDto, CreateStaffDto, UpdateStaffDto } from './manager.dto';
@@ -11,6 +11,8 @@ function computeFullName(firstName: string, lastName: string): string {
 
 @Injectable()
 export class ManagerService {
+  private readonly logger = new Logger(ManagerService.name);
+
   constructor(
     private prisma: PrismaService,
     private cache: CacheService,
@@ -454,7 +456,7 @@ export class ManagerService {
       await this.persistentSlotsService.regenerateSlotsAfterScheduleChange(clinicId, doctorId);
     } catch (error) {
       // Log but don't fail - slots can be generated later
-      console.warn(`Failed to auto-generate slots for doctor ${doctorId}:`, error);
+      this.logger.warn(`Failed to auto-generate slots for doctor ${doctorId}`, error instanceof Error ? error.message : error);
     }
 
     return updatedDoctor;
@@ -504,7 +506,7 @@ export class ManagerService {
       );
     } catch (error) {
       // Log but don't fail
-      console.warn(`Failed to delete slots for doctor ${doctorId}:`, error);
+      this.logger.warn(`Failed to delete slots for doctor ${doctorId}`, error instanceof Error ? error.message : error);
     }
 
     // Invalidate caches

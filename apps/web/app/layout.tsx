@@ -2,6 +2,7 @@ import './globals.css';
 import React from 'react';
 import { AuthProvider } from '../components/AuthProvider';
 import QueryProvider from '../components/QueryProvider';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 export const metadata = {
   title: 'ClinIQ Lite',
@@ -20,11 +21,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-background text-gray-900 font-sans">
-        <QueryProvider>
-          <AuthProvider>
-            {children}
-          </AuthProvider>
-        </QueryProvider>
+        <ErrorBoundary>
+          <QueryProvider>
+            <AuthProvider>
+              {children}
+            </AuthProvider>
+          </QueryProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

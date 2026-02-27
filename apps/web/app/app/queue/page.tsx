@@ -1,11 +1,9 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../../../components/AuthProvider';
 import DoctorSelector from '../../../components/appointments/DoctorSelector';
-import QueueCard from '../../../components/queue/QueueCard';
-import ScheduledCard from '../../../components/queue/ScheduledCard';
 import WalkInModal from '../../../components/queue/WalkInModal';
 import {
   useDoctors,
@@ -28,8 +26,6 @@ import {
   type QueueEntry,
   type QueueStatus,
   type Appointment,
-  type AssignedDoctor,
-  type DoctorCheckInStatus,
 } from '../../../lib/api';
 
 // Format time in clinic timezone
@@ -52,7 +48,7 @@ function formatTimeInTimezone(isoString: string | undefined | null, timezone: st
 }
 
 // Arrow component for flow visualization
-function FlowArrow({ direction = 'right', label }: { direction?: 'right' | 'down' | 'split'; label?: string }) {
+function FlowArrow({ direction = 'right' }: { direction?: 'right' | 'down' | 'split' }) {
   if (direction === 'down') {
     return (
       <div className="flex justify-center py-0.5 flex-shrink-0">
@@ -439,7 +435,6 @@ export default function QueuePage() {
     try {
       const { data, error } = await issueQueueToken(entryId);
       if (error || !data) {
-        console.error('Failed to generate status link:', error);
         alert('Failed to generate status link');
         return;
       }
@@ -456,8 +451,7 @@ export default function QueuePage() {
       setTimeout(() => {
         setCopiedEntryId(null);
       }, 2000);
-    } catch (err) {
-      console.error('Failed to copy link:', err);
+    } catch {
       alert('Failed to copy link to clipboard');
     } finally {
       setIsIssuingToken(null);

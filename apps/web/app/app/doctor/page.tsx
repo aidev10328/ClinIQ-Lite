@@ -70,8 +70,8 @@ export default function DoctorDashboardPage() {
   const handleCallPatient = async (queueEntryId: string) => {
     try {
       await callMutation.mutateAsync(queueEntryId);
-    } catch (e) {
-      console.error('Failed to call patient:', e);
+    } catch {
+      // Error is handled by mutation's onError/error state
     }
   };
 
@@ -79,8 +79,8 @@ export default function DoctorDashboardPage() {
     if (!dashboard?.now) return;
     try {
       await completeMutation.mutateAsync(dashboard.now.queueEntryId);
-    } catch (e) {
-      console.error('Failed to complete consultation:', e);
+    } catch {
+      // Error is handled by mutation's onError/error state
     }
   };
 
@@ -88,8 +88,8 @@ export default function DoctorDashboardPage() {
     if (!dashboard?.now) return;
     try {
       await noShowMutation.mutateAsync(dashboard.now.queueEntryId);
-    } catch (e) {
-      console.error('Failed to mark no-show:', e);
+    } catch {
+      // Error is handled by mutation's onError/error state
     }
   };
 

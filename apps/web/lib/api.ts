@@ -1628,11 +1628,6 @@ export async function managerGetLicensedDoctors() {
   return apiFetch<AssignedDoctor[]>('/v1/manager/licensed-doctors');
 }
 
-// Get staff member's assigned doctors (Manager only)
-export async function managerGetStaffDoctors(staffId: string) {
-  return apiFetch<AssignedDoctor[]>(`/v1/manager/staff/${staffId}/doctors`);
-}
-
 // Update staff member's doctor assignments (Manager only)
 export async function managerUpdateStaffDoctors(staffId: string, doctorIds: string[]) {
   return apiFetch<AssignedDoctor[]>(`/v1/manager/staff/${staffId}/doctors`, {
